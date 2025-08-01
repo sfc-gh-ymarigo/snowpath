@@ -915,7 +915,7 @@ with tab1:
             #Get Distinct Events Of Interest from Event Table
             if (uid != None and evt != None and tmstp != None):
             # Get Distinct Events Of Interest from Event Table
-                EOI = f"SELECT DISTINCT {evt} FROM {tbl} ORDER BY {evt}"
+                EOI = f"SELECT DISTINCT {evt} FROM {database}.{schema}.{tbl} ORDER BY {evt}"
                         # Get start EOI :
                 start = session.sql(EOI).collect()
             # Get end EOI :
@@ -999,7 +999,7 @@ with tab1:
                 col1, col2, col3 = st.columns([2.4,2.4,10])
 
                 # SQL query to get the min start date
-                minstartdt = f"SELECT   TO_VARCHAR(MIN ({tmstp}), 'YYYY/MM/DD') FROM {tbl}"
+                minstartdt = f"SELECT   TO_VARCHAR(MIN ({tmstp}), 'YYYY/MM/DD') FROM {database}.{schema}.{tbl}"
                 # Get min start date :
                 defstartdt = session.sql(minstartdt).collect()
                 defstartdt_str = defstartdt[0][0] 
@@ -1099,7 +1099,7 @@ with tab1:
                         # Helper function to fetch distinct values from a column
                         def fetch_distinct_values(column):
                             """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {tbl}"
+                            query = f"SELECT DISTINCT {column} FROM {database}.{schema}.{tbl}"
                             result = session.sql(query).collect()
                             distinct_values = [row[column] for row in result]
                             return distinct_values
@@ -1225,7 +1225,7 @@ with tab1:
                 path_to_agg_sql = f"""
                 select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                             match_recognize(
                             {partitionby} 
                             order by {tmstp}  
@@ -1246,7 +1246,7 @@ with tab1:
                     from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
                  FROM
-                {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
          ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
         FROM events_with_diff)
@@ -1292,7 +1292,7 @@ with tab1:
                     show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst.")
                     #show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst. In the Tree diagram you can click on a node to select a specific path. Once a path is selected, it will be displayed, showing the sequence of events leading to or from the chosen point. To create a customer segment, expand the CREATE SEGMENT section, choose a database and schema from the available options and enter a segment table name where the user IDs will be stored. After configuring these details, create a new segment by clicking 'Create Segment' which will generate a new table and insert the selected user IDs, or append the selected IDs to an existing table by clicking 'Append to Segment'.")
 
-
+                
                 # Place the radio button in the second column, but only if the toggle is on
                 with col2:
                     if show_details:
@@ -1568,7 +1568,7 @@ with tab1:
                     
                     path_to_det_sql = f"""
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         match_recognize(
                         {partitionby} 
                         order by {tmstp} 
@@ -1594,7 +1594,7 @@ with tab1:
                     path_to_det_sql = f"""
                     select {uid}, listagg({display}, ',') within group (order by MSQ) as path
                     from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                 SELECT *FROM sessions) 
@@ -1637,7 +1637,7 @@ with tab1:
                 path_frm_agg_sql = f"""
                 select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                             match_recognize(
                             {partitionby} 
                             order by {tmstp}  
@@ -1659,7 +1659,7 @@ with tab1:
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
-                 FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                 FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
                 FROM events_with_diff)
@@ -1853,7 +1853,6 @@ with tab1:
                                     )
                                 #st.write(f"👤 Extracted UIDs: {list(flattened_uids)}")
                         #st.write(f"📌 Current Distinct UIDs in Memory: {st.session_state['selected_uids']}")
-                        # 🔹 : Add a Manual Reset Button**
                         # if st.button("🔄 Reset Selection", use_container_width=False):
                         #     # Reset all relevant session state variables
                         #     st.session_state["selected_uids"] = set()
@@ -1967,11 +1966,11 @@ with tab1:
                     st.code(path_frm_agg_sql, language='sql')
 
             if st.toggle("View Detailed Individual Paths"):
-        # Individual Paths SQL
+            # Individual Paths SQL
                 if unitoftime==None and timeout ==None :
                     path_frm_det_sql = f"""
                     select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         match_recognize(
                         {partitionby} 
                         order by {tmstp} 
@@ -1996,7 +1995,7 @@ with tab1:
                     path_frm_det_sql = f"""
                     select {uid}, listagg({display}, ',') within group (order by MSQ) as path
                     from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                 SELECT *FROM sessions) 
@@ -2037,7 +2036,7 @@ with tab1:
                 path_betw_agg_sql = f"""
                 select top {topn} path, count(*) as count, array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                             match_recognize(
                             {partitionby} 
                             order by {tmstp}  
@@ -2059,7 +2058,7 @@ with tab1:
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
-                 FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                 FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
                 FROM events_with_diff)
@@ -2103,8 +2102,11 @@ with tab1:
                 # Place the radio button in the second column, but only if the toggle is on
                 with col2:
                     if show_details:
-                        genre = st.pills("Choose a visualization:",["Sankey", "Graph", "Sunburst"],label_visibility="collapsed" )
-            
+                        genre = st.pills(
+                            "Choose a visualization:",
+                            ["Sankey", "Graph", "Sunburst"],
+                            label_visibility="collapsed"
+                        )
                 # Place the visualization outside of the columns layout
                 if show_details:
             
@@ -2284,7 +2286,7 @@ with tab1:
                 if unitoftime==None and timeout ==None :
                     path_betw_det_sql = f"""
                     select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         match_recognize(
                         {partitionby} 
                         order by {tmstp} 
@@ -2309,7 +2311,7 @@ with tab1:
                     path_betw_det_sql = f"""
                     select {uid}, listagg({display}, ',') within group (order by MSQ) as path
                     from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                 SELECT *FROM sessions) 
@@ -2347,9 +2349,9 @@ with tab1:
             # Aggregate results for Sankey plot
             if unitoftime==None and timeout ==None :
                 path_tupl_agg_sql = f"""
-                select top {topn} path, count(*) as count from (
+                select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ) as path
-                        from (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                             match_recognize(
                             {partitionby} 
                             order by {tmstp}  
@@ -2365,10 +2367,10 @@ with tab1:
                 
             elif unitoftime != None and timeout !=None :
                 path_tupl_agg_sql = f"""
-                select top {topn} path, count(*) as count from (
+                select top {topn} path, count(*) as count ,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                 SELECT *FROM sessions) 
@@ -2397,11 +2399,9 @@ with tab1:
                 # Place the radio button in the second column, but only if the toggle is on
                 with col2:
                     if show_details:
-                        genre = st.radio(
+                        genre = st.pills(
                             "Choose a visualization:",
                             ["Sankey", "Graph", "Sunburst"],
-                            index=None,
-                            horizontal=True,
                             label_visibility="collapsed"
                         )
             
@@ -2413,7 +2413,134 @@ with tab1:
                             sli = st.slider("Path Count Filter", 0, topn, topn)
                         with col2:
                             st.write("")
-                        sankeyPlot(res, "to", "", sli)
+                        #sankeyPlot(res, "to", "", sli)
+                        current_df_hash = hash(res.to_json())
+                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                            st.session_state["last_df_hash"] = current_df_hash  # Update hash
+                            # Reset state variables
+                            st.session_state["clicked_sankey"] = None
+                            st.session_state["clicked_source"] = None
+                            st.session_state["clicked_target"] = None
+                            st.session_state["selected_uids"] = set()
+                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                            st.session_state["sankey_chart"] = None
+                            st.session_state["sankey_links"] = {}
+                            st.session_state["sankey_labels"] = []
+                            st.session_state["sortedEventList"] = []
+                            
+                            #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
+                        # Session state to store extracted user data
+                        if "selected_paths_df" not in st.session_state:
+                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                        
+                        clicked_sankey = sankey_chart(res, direction="to")
+                        
+                        if clicked_sankey:
+                            sankeyLabel = st.session_state.get("sankey_labels", [])
+                            sortedEventList = st.session_state.get("sortedEventList", [])
+                            sankeyLinks = st.session_state.get("sankey_links", {})
+                            if "source" in clicked_sankey and "target" in clicked_sankey:
+                                source_index = clicked_sankey["source"]
+                                target_index = clicked_sankey["target"]
+                                clicked_source = sortedEventList[source_index]
+                                clicked_target = sortedEventList[target_index]
+                                st.caption(f"Selected Edge: {clicked_source.split('_', 1)[1]} → {clicked_target.split('_', 1)[1]}")
+                                valuePair = f"{clicked_source}+{clicked_target}"
+                                extracted_uids = sankeyLinks.get(valuePair, {}).get("uids", [])
+                                #st.write(f"👤 Extracted UIDs: {extracted_uids}")
+                                flattened_uids = set()
+                                for uid_list in extracted_uids:
+                                    if isinstance(uid_list, list):
+                                        flattened_uids.update(map(str, uid_list))
+                                    else:
+                                        flattened_uids.add(str(uid_list))
+                                # Store in session state (initialize if not present)
+                                if "selected_uids" not in st.session_state:
+                                    st.session_state["selected_uids"] = flattened_uids
+                                else:
+                                    st.session_state["selected_uids"].update(flattened_uids)  # Accumulate UIDs
+                                # Update DataFrame for UI display
+                                new_entry = pd.DataFrame([{"Source": clicked_source, "Target": clicked_target, "User_IDs": list(flattened_uids)}])
+                                if "selected_paths_df" not in st.session_state:
+                                    st.session_state["selected_paths_df"] = new_entry
+                                else:
+                                    st.session_state["selected_paths_df"] = pd.concat(
+                                        [st.session_state["selected_paths_df"], new_entry], ignore_index=True
+                                    )
+                                #st.write(f"👤 Extracted UIDs: {list(flattened_uids)}")
+                        #st.write(f"📌 Current Distinct UIDs in Memory: {st.session_state['selected_uids']}")
+                        # 🔹 : Add a Manual Reset Button**
+                        # if st.button("🔄 Reset Selection", use_container_width=False):
+                        #     # Reset all relevant session state variables
+                        #     st.session_state["selected_uids"] = set()
+                        #     st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                        #     st.session_state["clicked_sankey"] = None
+                        #     st.session_state["clicked_source"] = None
+                        #     st.session_state["clicked_target"] = None
+                        #     st.session_state["sankey_links"] = {}
+                        #     st.session_state["sankey_labels"] = []
+                        #     st.session_state["sortedEventList"] = []
+                            
+                        #     st.session_state["refresh_key"] = not st.session_state.get("refresh_key", False)
+                        #     #st.success("✅ Selections & memory cleared!")
+                        #     #st.write(f"📌 Current Distinct UIDs in Memory: {st.session_state['selected_uids']}")
+                        
+                        # with st.expander("CREATE SEGMENT"):
+                        #     # Fetch available databases
+                        #     sqldb = "SHOW DATABASES"
+                        #     databases = session.sql(sqldb).collect()
+                        #     db0 = pd.DataFrame(databases)
+                        #     col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+                        #     # Database Selection
+                        #     with col1:
+                        #         database = st.selectbox("Select Database", key="segmentdb", index=None, 
+                        #                                 placeholder="Choose from list...", options=db0["name"].unique())
+                        #     # Schema Selection
+                        #     schema = None
+                        #     if database:
+                        #         sqlschemas = f"SHOW SCHEMAS IN DATABASE {database}"
+                        #         schemas = session.sql(sqlschemas).collect()
+                        #         schema0 = pd.DataFrame(schemas)
+                        #         with col2:
+                        #             schema = st.selectbox("Select Schema", key="segmentsch", index=None, 
+                        #                                 placeholder="Choose from list...", options=schema0["name"].unique())
+                        #     # Table Name Input
+                        #     table_name = None
+                        #     if database and schema:
+                        #         with col3:
+                        #             table_name = st.text_input("Enter Segment Table Name", key="segmenttbl", placeholder="Type table name...")
+                        #     # ✅ Use selected UIDs directly from session_state
+                        #     selected_uids = st.session_state.get("selected_uids", set())
+                        #     if database and schema and table_name and selected_uids:
+                        #         #st.write(f"🔍 Extracted UIDs for insertion: {selected_uids}")
+                        #         create_table_sql = f"""
+                        #         CREATE OR REPLACE TABLE {database}.{schema}.{table_name} (
+                        #             ID STRING
+                        #         )
+                        #         """
+                        #         # Convert UIDs to SQL-safe format
+                        #         values = ", ".join([f"('{uid}')" for uid in selected_uids])
+                        #         insert_sql = f"INSERT INTO {database}.{schema}.{table_name} (ID) VALUES {values};" if values else ""
+                        #         #st.write(f"🔍 SQL Insert Preview:\n{insert_sql}")  # Debugging
+                        #         with col4:
+                        #             if st.button("Create Segment", use_container_width=True):
+                        #                 try:
+                        #                     session.sql(create_table_sql).collect()
+                        #                     if values:
+                        #                         session.sql(insert_sql).collect()
+                        #                     st.success(f"✅ Segment `{database}.{schema}.{table_name}` created successfully!")
+                        #                 except Exception as e:
+                        #                     st.error(f"❌ Error executing SQL: {e}")
+                        #         with col5:
+                        #             if st.button("Append to Segment", use_container_width=True):
+                        #                 try:
+                        #                     if values:
+                        #                         session.sql(insert_sql).collect()
+                        #                         st.success(f"✅ IDs successfully appended to `{database}.{schema}.{table_name}`!")
+                        #                     else:
+                        #                         st.warning("⚠️ No IDs selected to append.")
+                        #                 except Exception as e:
+                        #                     st.error(f"❌ Error executing SQL: {e}")
             
                     elif genre == 'Graph':
                         sigma_graph(res)
@@ -2538,7 +2665,7 @@ with tab2:
             #Get Distinct Events Of Interest from Event Table
             if (uid != None and evt != None and tmstp != None):
             # Get Distinct Events Of Interest from Event Table
-                EOI = f"SELECT DISTINCT {evt} FROM {tbl} ORDER BY {evt}"
+                EOI = f"SELECT DISTINCT {evt} FROM {database}.{schema}.{tbl} ORDER BY {evt}"
                         # Get start EOI :
                 start = session.sql(EOI).collect()
             # Get end EOI :
@@ -2623,7 +2750,7 @@ with tab2:
                 col1, col2, col3 = st.columns([2.4,2.4,10])
 
                 # SQL query to get the min start date
-                minstartdt = f"SELECT   TO_VARCHAR(MIN ({tmstp}), 'YYYY/MM/DD') FROM {tbl}"
+                minstartdt = f"SELECT TO_VARCHAR(MIN ({tmstp}), 'YYYY/MM/DD') FROM {database}.{schema}.{tbl}"
                 # Get min start date :
                 defstartdt = session.sql(minstartdt).collect()
                 defstartdt_str = defstartdt[0][0] 
@@ -2717,7 +2844,7 @@ with tab2:
                         # Helper function to fetch distinct values from a column
                         def fetch_distinct_values(column):
                             """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {tbl}"
+                            query = f"SELECT DISTINCT {column} FROM {database}.{schema}.{tbl}"
                             result = session.sql(query).collect()
                             distinct_values = [row[column] for row in result]
                             return distinct_values
@@ -2893,7 +3020,7 @@ with tab2:
             # Get Distinct Events Of Interest from Event Table
             if (uid1 is not None and evt1 is not None and tmstp1 is not None):
                 # Get Distinct Events Of Interest from Event Table
-                EOI1 = f"SELECT DISTINCT {evt1} FROM {tbl1} ORDER BY {evt1}"
+                EOI1 = f"SELECT DISTINCT {evt1} FROM {database1}.{schema1}.{tbl1} ORDER BY {evt1}"
                 # Get start EOI :
                 start1 = session.sql(EOI1).collect()
                 # Get end EOI :
@@ -3065,7 +3192,7 @@ with tab2:
                         # Helper function to fetch distinct values from a column
                         def fetch_distinct_values_instance(column):
                             """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {tbl1}"
+                            query = f"SELECT DISTINCT {column} FROM {database1}.{schema1}.{tbl1}"
                             result = session.sql(query).collect()
                             distinct_values = [row[column] for row in result]
                             return distinct_values
@@ -3220,7 +3347,7 @@ with tab2:
                         
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -3235,7 +3362,7 @@ with tab2:
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                         SELECT *FROM sessions) match_recognize(
@@ -3262,8 +3389,8 @@ with tab2:
                     if unitoftime==None and timeout ==None :
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
-                        {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
+                        from  (select * from {database}.{schema}.{tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
+                        {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -3277,8 +3404,8 @@ with tab2:
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
-                        {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
+                        {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                         SELECT *FROM sessions)
@@ -3470,7 +3597,7 @@ with tab2:
                         
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -3486,7 +3613,7 @@ with tab2:
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                         SELECT *FROM sessions)
@@ -3515,7 +3642,7 @@ with tab2:
                     
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
+                        from  (select * from {database}.{schema}.{tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3})and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
@@ -3532,7 +3659,7 @@ with tab2:
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
@@ -3749,7 +3876,7 @@ with tab2:
                         
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -3764,7 +3891,7 @@ with tab2:
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                         SELECT *FROM sessions) 
@@ -3792,7 +3919,7 @@ with tab2:
                         
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
+                        from  (select * from {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
                             match_recognize(
                             {partitionby1} 
                             order by {tmstp1} 
@@ -3807,7 +3934,7 @@ with tab2:
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
-                        {tmstp1}) AS TIMEWINDOW FROM {tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
+                        {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
                         ,sessions AS (SELECT {uid1},{tmstp1},{evt1},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout1} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS session FROM events_with_diff)
                         SELECT *FROM sessions) 
@@ -4002,7 +4129,7 @@ with tab2:
                         
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -4017,7 +4144,7 @@ with tab2:
                         crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                        {tmstp}) AS TIMEWINDOW FROM {tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                        {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
                         SELECT *FROM sessions) 
@@ -4046,7 +4173,7 @@ with tab2:
                         
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
-                        from  (select * from {tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
+                        from  (select * from {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
                             match_recognize(
                             {partitionby1} 
                             order by {tmstp1} 
@@ -4061,7 +4188,7 @@ with tab2:
                         crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
-                        {tmstp1}) AS TIMEWINDOW FROM {tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
+                        {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
                         ,sessions AS (SELECT {uid1},{tmstp1},{evt1},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout1} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
                         OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS session FROM events_with_diff)
                         SELECT *FROM sessions) 
