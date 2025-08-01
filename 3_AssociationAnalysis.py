@@ -410,11 +410,9 @@ LIFT_STATS ls;
         # Place the radio button in the second column, but only if the toggle is on
         with col2:
             if show_details:
-                genre = st.radio(
+                genre = st.pills(
                     "Choose a visualization:",
                     ["Detailed Table", "Heatmap", "Graph"],
-                    index=None,
-                    horizontal=True,
                     label_visibility="collapsed"
                 )
     
