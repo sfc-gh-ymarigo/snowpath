@@ -4,4 +4,23 @@ Snowpath™ native Streamlit application allows users to easily and visually per
 
 Identifying, visualizing and explaining paths can itself be actionable and often uncovers an area of interest for additional analysis. First, the picture revealed by path analysis can be further enriched with attribution and association analysis. Attribution helps quantify the contribution of individual touchpoint to a defined outcome, while association analysis uncovers relationships between events that frequently occur together. Together, these techniques provide a holistic understanding of event sequences, enabling data-driven decision-making and uncovering new opportunities for customer experience optimization. Second, path insights can be used directly to predict outcomes or to derive behavioral features (such as the frequency of specific patterns). These features can then be integrated into existing predictive models, enhancing their accuracy and enabling deeper behavioral segmentation. 
 
+## Setup
 
+To set up Snowpath in your own Snowflake account, follow these steps:
+
+1. Download this repository to your local machine.
+2. Create a new database in Snowflake for the sample data and application
+```sql
+create or replace database snowpath;
+create or replace schema app;
+create or replace stage app_stage;
+```
+3. Upload all *.py, *.yml, and *.png files to the created `app_stage`.
+4. Create the streamlit app with the following command.
+```sql
+CREATE STREAMLIT snowpath_streamlit
+  FROM @snowpath.app.app_stage
+  MAIN_FILE = 'streamlit_app.py'
+  QUERY_WAREHOUSE = default_wh;
+```
+5. TODO - Create synthetic data for the app
