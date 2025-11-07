@@ -1,3 +1,4 @@
+
 # Import python packages
 import json
 import streamlit as st
@@ -21,21 +22,447 @@ from matplotlib.colors import Normalize
 from streamlit_echarts import st_echarts
 import math
 import ast
-from streamlit_extras.app_logo import add_logo
+
 
 
 # Call function to create new or get existing Snowpark session to connect to Snowflake
 session = get_active_session()
 
+# AI Helper Functions (from Pattern Mining)
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_available_cortex_models():
+    """Fetch available Cortex models from Snowflake"""
+    try:
+        models_query = "SHOW MODELS IN SNOWFLAKE.MODELS"
+        models_result = session.sql(models_query).collect()
+        
+        if models_result:
+            # Extract model names and filter out Arctic (text-to-SQL model)
+            models = [row['name'] for row in models_result if 'arctic' not in row['name'].lower()]
+            return {"models": models, "status": "found"}
+        else:
+            return {"models": [], "status": "not_found"}
+    except Exception as e:
+        return {"models": [], "status": "error", "error": str(e)}
+
+def refresh_cortex_models():
+    """Refresh the Cortex models list"""
+    try:
+        # Clear the cache first
+        get_available_cortex_models.clear()
+        
+        # Try to refresh the models list
+        refresh_query = "CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH()"
+        session.sql(refresh_query).collect()
+        
+        # Get updated models
+        return get_available_cortex_models()
+    except Exception as e:
+        return {"models": [], "status": "refresh_error", "error": str(e)}
+
+# Function to display AI insights UI with model selection and toggle
+def display_ai_insights_section(key_prefix, help_text="Select the LLM model for AI analysis", ai_content_callback=None):
+    
+    with st.expander("AI Insights & Recommendations", expanded=False, icon=":material/network_intel_node:"):
+        models_result = get_available_cortex_models()
+        available_models = models_result["models"]
+        status = models_result["status"]
+        
+        # Show status message if needed
+        if status == "not_found":
+            st.warning("No Cortex models found in your Snowflake account. Using default models.", icon=":material/warning:")
+            
+            # Add refresh option in expander to not clutter main UI
+            with st.expander("Refresh Model List", icon=":material/refresh:"):
+                if st.button("Refresh Cortex Models", key=f"refresh_{key_prefix}", help="This may take a few moments to complete"):
+                    with st.spinner("Refreshing Cortex models list..."):
+                        refresh_result = refresh_cortex_models()
+                        if refresh_result["status"] == "found":
+                            st.success(f"Found {len(refresh_result['models'])} Cortex models after refresh!")
+                            st.rerun()  # Refresh the UI to show new models
+                        elif refresh_result["status"] == "refresh_error":
+                            st.error(f"Failed to refresh models: {refresh_result.get('error', 'Unknown error')}", icon=":material/chat_error:")
+                        else:
+                            st.error("No Cortex models found even after refresh.", icon=":material/chat_error:")
+        
+        elif status == "error":
+            st.warning(f"Could not fetch model list: {models_result.get('error', 'Unknown error')}. Using default models.", icon=":material/warning:")
+        
+        # Always show model selection (with fallback models if needed)
+        if not available_models:
+            available_models = ["mixtral-8x7b", "mistral-large", "llama2-70b-chat"]
+        
+        model_options = available_models + ["Enter custom model name"]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            selected_option = st.selectbox(
+                "Choose AI Model",
+                options=model_options,
+                index=0,
+                key=f"{key_prefix}_select",
+                help=help_text
+            )
+            
+            if selected_option == "Enter custom model name":
+                selected_model = st.text_input(
+                    "Enter Model Name",
+                    value="mixtral-8x7b",
+                    key=f"{key_prefix}_custom",
+                    help="Enter the exact model name (e.g., mixtral-8x7b, mistral-large)"
+                )
+            else:
+                selected_model = selected_option
+        
+        # Create two columns for toggle and pills layout (like Show Me pattern)
+        col1, col2 = st.columns([2, 7])
+        
+        # Place the toggle in the first column
+        with col1:
+            ai_enabled = st.toggle("Expl**AI**n Me!", key=f"{key_prefix}_toggle", help="Generate AI insights and recommendations for your path analysis results. **Auto**: Pre-built analysis with structured insights. **Custom**: Enter your own questions and prompts for personalized analysis.")
+        
+        # Place the pills in the second column, but only if the toggle is on
+        with col2:
+            if ai_enabled:
+                prompt_type = st.pills(
+                    "Choose prompt type:",
+                    ["Auto", "Custom"],
+                    key=f"{key_prefix}_prompt_pills",
+                    label_visibility="collapsed"
+                )
+            else:
+                prompt_type = None
+        
+        # If AI is enabled, pills are selected, and callback provided, execute the AI content within the expander
+        if ai_enabled and prompt_type and ai_content_callback:
+            ai_content_callback(selected_model, prompt_type)
+        
+        return selected_model, ai_enabled, prompt_type
+
+#===================================================================================
+# Cached Parameter Query Functions (to avoid repeated queries)
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+def fetch_databases(_session):
+    """Fetch list of databases - cached to avoid repeated queries"""
+    sqldb = "SHOW DATABASES"
+    databases = _session.sql(sqldb).collect()
+    return pd.DataFrame(databases)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_schemas(_session, database):
+    """Fetch schemas for a given database - cached"""
+    if not database:
+        return pd.DataFrame()
+    sqlschemas = f"SHOW SCHEMAS IN DATABASE {database}"
+    schemas = _session.sql(sqlschemas).collect()
+    return pd.DataFrame(schemas)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_tables(_session, database, schema):
+    """Fetch tables for a given database and schema - cached"""
+    if not database or not schema:
+        return pd.DataFrame()
+    sqltables = f"""
+        SELECT TABLE_NAME 
+        FROM {database}.INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = '{schema}' AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+    """
+    tables = _session.sql(sqltables).collect()
+    return pd.DataFrame(tables)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_columns(_session, database, schema, tbl):
+    """Fetch columns for a given table - cached"""
+    if not database or not schema or not tbl:
+        return pd.DataFrame()
+    cols = f"""
+        SELECT COLUMN_NAME
+        FROM {database}.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{tbl}'
+        ORDER BY ORDINAL_POSITION;
+    """
+    colssql = _session.sql(cols).collect()
+    return pd.DataFrame(colssql)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_column_type(_session, database, schema, tbl, column):
+    """Fetch column data type - cached"""
+    if not database or not schema or not tbl or not column:
+        return None
+    column_info_query = f"""
+        SELECT DATA_TYPE
+        FROM {database}.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{tbl}' AND COLUMN_NAME = '{column}';
+    """
+    column_info = _session.sql(column_info_query).collect()
+    if column_info:
+        return column_info[0]['DATA_TYPE']
+    return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_distinct_values(_session, database, schema, tbl, column):
+    """Fetch distinct values from a column - cached"""
+    if not database or not schema or not tbl or not column:
+        return pd.DataFrame()
+    query = f"SELECT DISTINCT {column} FROM {database}.{schema}.{tbl} ORDER BY {column}"
+    values = _session.sql(query).collect()
+    return pd.DataFrame(values)
+
 #st.set_page_config(layout="wide")
 
 st.markdown("""
         <style>
+/* Override Streamlit theme variables for rounded corners */
+:root {
+    --baseRadius: 10px !important;
+}
+
+.stApp {
+    --baseRadius: 10px !important;
+}
+
+/* Force rounded corners on all alert/message elements */
+* {
+    --baseRadius: 10px !important;
+}
+
+/* Block container styling */
                .block-container {
                     padding-top: 1rem;
                     padding-bottom: 1rem;
                     padding-left: 2rem;
                     padding-right: 2rem;
+                }
+
+/* Subtle spacing adjustment for message elements */
+div[data-testid="stAlert"],
+div[data-testid="stInfo"], 
+div[data-testid="stWarning"],
+div[data-testid="stError"],
+div[data-testid="stSuccess"] {
+    margin-bottom: 0.5rem !important;
+}
+
+.custom-container-1 {
+    background-color: #f0f2f6 !important;
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+/* Custom styling for all message types - aggressive rounded corners and tight margins */
+.stAlert,
+.stAlert *,
+.stAlert[data-baseweb="notification"],
+.stAlert[data-baseweb="notification"] *,
+div[data-testid="stAlert"],
+div[data-testid="stAlert"] *,
+div[data-testid="stInfo"],
+div[data-testid="stInfo"] *,
+div[data-testid="stWarning"],
+div[data-testid="stWarning"] *,
+div[data-testid="stError"],
+div[data-testid="stError"] *,
+div[data-testid="stSuccess"],
+div[data-testid="stSuccess"] * {
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+    -webkit-border-radius: 10px !important;
+    -moz-border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"] {
+    background-color: #f0f2f6 !important;
+    border: none !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"] > div {
+    background-color: #f0f2f6 !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Warning messages - orange/yellow tint */
+.stAlert[data-baseweb="notification"][data-testid="stWarning"] {
+    background-color: #fff3cd !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
+    background-color: #fff3cd !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Error messages - red tint */
+.stAlert[data-baseweb="notification"][data-testid="stError"] {
+    background-color: #f8d7da !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stError"] > div {
+    background-color: #f8d7da !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Success messages - green tint */
+.stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
+    background-color: #d1f2eb !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
+    background-color: #d1f2eb !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Remove default icons and customize */
+.stAlert .stAlert-content::before {
+    content: none !important;
+}
+
+/* Hide all default icons with multiple selectors */
+.stAlert svg,
+.stSuccess svg,
+.stInfo svg,
+div[data-testid="stAlert"] svg,
+div[data-testid="stSuccess"] svg,
+div[data-testid="stInfo"] svg,
+.stAlert .stIcon,
+.stSuccess .stIcon,
+.stInfo .stIcon,
+.stAlert::before,
+.stSuccess::before,
+.stInfo::before,
+div[data-testid="stAlert"]::before,
+div[data-testid="stSuccess"]::before,
+div[data-testid="stInfo"]::before {
+    display: none !important;
+    visibility: hidden !important;
+    content: "" !important;
+}
+
+/* Override Streamlit's default alert styling more aggressively */
+div[data-testid="stAlert"] {
+    padding: 10px 14px !important;
+    line-height: 1.5 !important;
+    font-size: 14px !important;
+}
+
+div[data-testid="stAlert"] > div {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Target all text content inside alerts */
+.stAlert p,
+.stAlert div,
+.stAlert span,
+div[data-testid="stAlert"] p,
+div[data-testid="stAlert"] div,
+div[data-testid="stAlert"] span {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* More specific targeting for alert types */
+div[data-testid="stSuccess"],
+div[data-testid="stInfo"],
+div[data-testid="stWarning"],
+div[data-testid="stError"] {
+    padding: 10px 14px !important;
+    line-height: 1.5 !important;
+    font-size: 14px !important;
+    border-radius: 10px !important;
+}
+
+@media (prefers-color-scheme: dark) {
+    .custom-container-1 {
+        background-color: transparent !important;
+        border: 1px solid #29B5E8 !important;
+    }
+    
+    /* Custom styling for all message types in dark mode */
+    .stAlert[data-baseweb="notification"] {
+        background-color: transparent !important;
+        border: 1px solid #29B5E8 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Warning messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stWarning"] {
+        background-color: transparent !important;
+        border: 1px solid #ffc107 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Error messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stError"] {
+        background-color: transparent !important;
+        border: 1px solid #dc3545 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stError"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Success messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
+        background-color: transparent !important;
+        border: 1px solid #28a745 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
                 }
         </style>
         """, unsafe_allow_html=True)
@@ -44,45 +471,45 @@ st.markdown("""
  #--------------------------------------
  # Function for Sankey plot
 def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
-     npath_pandas = res.copy()
-     if topN:
-         npath_pandas = npath_pandas.sort_values(by='COUNT', ascending=False).head(topN)
- 
-     if direction == "from":
-         dataDict = defaultdict(int)
-         for index, row in npath_pandas.iterrows():
-             pathCnt = row['COUNT']
-             rowList = [item.strip() for item in row['PATH'].split(',')]
-             for i in range(len(rowList) - 1):
-                 leftValue = rowList[i] + str(i)
-                 rightValue = rowList[i + 1] + str(i + 1)
-                 valuePair = leftValue + '+' + rightValue
-                 dataDict[valuePair] += pathCnt
+    npath_pandas = res.copy()
+    if topN:
+        npath_pandas = npath_pandas.sort_values(by='COUNT', ascending=False).head(topN)
+
+    if direction == "from":
+        dataDict = defaultdict(int)
+        for index, row in npath_pandas.iterrows():
+            pathCnt = row['COUNT']
+            rowList = [item.strip() for item in row['PATH'].split(',')]
+            for i in range(len(rowList) - 1):
+                leftValue = rowList[i] + str(i)
+                rightValue = rowList[i + 1] + str(i + 1)
+                valuePair = leftValue + '+' + rightValue
+                dataDict[valuePair] += pathCnt
+        
+        eventList = []
+        for key in dataDict.keys():
+            leftValue, rightValue = key.split('+')
+            if leftValue not in eventList:
+                eventList.append(leftValue)
+            if rightValue not in eventList:
+                eventList.append(rightValue)
+        
+        sankeyLabel = [s[:-1] for s in eventList]
+        sankeySource = []
+        sankeyTarget = []
+        sankeyValue = []
          
-         eventList = []
-         for key in dataDict.keys():
-             leftValue, rightValue = key.split('+')
-             if leftValue not in eventList:
-                 eventList.append(leftValue)
-             if rightValue not in eventList:
-                 eventList.append(rightValue)
-         
-         sankeyLabel = [s[:-1] for s in eventList]
-         sankeySource = []
-         sankeyTarget = []
-         sankeyValue = []
-         
-         for key, val in dataDict.items():
+        for key, val in dataDict.items():
              sankeySource.append(eventList.index(key.split('+')[0]))
              sankeyTarget.append(eventList.index(key.split('+')[1]))
              sankeyValue.append(val)
          
-         sankeyColor = []
-         for i in sankeyLabel:
+        sankeyColor = []
+        for i in sankeyLabel:
              sankeyColor.append('#' + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)]))
          
          # Updated Sankey configuration with font properties
-         data = go.Sankey(
+        data = go.Sankey(
          arrangement = "snap",
          node = dict(
              pad = 15,
@@ -104,8 +531,8 @@ def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
          )
      )
          
-         fig = go.Figure(data)
-         fig.update_layout(
+        fig = go.Figure(data)
+        fig.update_layout(
              hovermode='closest',
              title=dict(
                  text=title_text,
@@ -118,45 +545,45 @@ def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
                  size=14,
                  color="black"
              )
-         )
-         st.plotly_chart(fig)
+        )
+        st.plotly_chart(fig)
+
+    elif direction == "to":
+        dataDict = defaultdict(int)
+        eventDict = defaultdict(int)
+        maxPath = npath_pandas['COUNT'].max()
+        
+        for index, row in npath_pandas.iterrows():
+            rowList = row['PATH'].split(',')
+            pathCnt = row['COUNT']
+            pathLen = len(rowList)
+            for i in range(len(rowList) - 1):
+                leftValue = str(150 + i + maxPath - pathLen) + rowList[i].strip()
+                rightValue = str(150 + i + 1 + maxPath - pathLen) + rowList[i + 1].strip()
+                valuePair = leftValue + '+' + rightValue
+                dataDict[valuePair] += pathCnt
+                eventDict[leftValue] += 1
+                eventDict[rightValue] += 1
+
+        eventList = []
+        for key, val in eventDict.items():
+            eventList.append(key)
+        sortedEventList = sorted(eventList)
+
+        sankeyLabel = []
+        for event in sortedEventList:
+            sankeyLabel.append(event[3:])
  
-     elif direction == "to":
-         dataDict = defaultdict(int)
-         eventDict = defaultdict(int)
-         maxPath = npath_pandas['COUNT'].max()
-         
-         for index, row in npath_pandas.iterrows():
-             rowList = row['PATH'].split(',')
-             pathCnt = row['COUNT']
-             pathLen = len(rowList)
-             for i in range(len(rowList) - 1):
-                 leftValue = str(150 + i + maxPath - pathLen) + rowList[i].strip()
-                 rightValue = str(150 + i + 1 + maxPath - pathLen) + rowList[i + 1].strip()
-                 valuePair = leftValue + '+' + rightValue
-                 dataDict[valuePair] += pathCnt
-                 eventDict[leftValue] += 1
-                 eventDict[rightValue] += 1
- 
-         eventList = []
-         for key, val in eventDict.items():
-             eventList.append(key)
-         sortedEventList = sorted(eventList)
- 
-         sankeyLabel = []
-         for event in sortedEventList:
-             sankeyLabel.append(event[3:])
- 
-         sankeySource = []
-         sankeyTarget = []
-         sankeyValue = []
-         for key, val in dataDict.items():
+        sankeySource = []
+        sankeyTarget = []
+        sankeyValue = []
+        for key, val in dataDict.items():
              sankeySource.append(sortedEventList.index(key.split('+')[0]))
              sankeyTarget.append(sortedEventList.index(key.split('+')[1]))
              sankeyValue.append(val)
  
-         sankeyColor = []
-         for i in sankeyLabel:
+        sankeyColor = []
+        for i in sankeyLabel:
              sankeyColor.append('#' + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)]))
  
          # Updated Sankey configuration with font properties
@@ -183,8 +610,8 @@ def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
          )
      )
          
-         fig = go.Figure(data)
-         fig.update_layout(
+        fig = go.Figure(data)
+        fig.update_layout(
              hovermode='closest',
              title=dict(
                  text=title_text,
@@ -198,82 +625,82 @@ def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
                  color="black"
              )
          )
-         st.plotly_chart(fig)
+        st.plotly_chart(fig)
  
-     elif direction == "no_direction":
-         dataDict = defaultdict(int)
-         for index, row in npath_pandas.iterrows():
-             pathCnt = row['COUNT']
-             rowList = [item.strip() for item in row['PATH'].split(',')]
-             for i in range(len(rowList) - 1):
-                 leftValue = rowList[i] + str(i)
-                 rightValue = rowList[i + 1] + str(i + 1)
-                 valuePair = leftValue + '+' + rightValue
-                 dataDict[valuePair] += pathCnt
- 
-         eventList = []
-         for key in dataDict.keys():
-             leftValue, rightValue = key.split('+')
-             if leftValue not in eventList:
-                 eventList.append(leftValue)
-             if rightValue not in eventList:
-                 eventList.append(rightValue)
- 
-         sankeyLabel = [s[:-1] for s in eventList]
-         sankeySource = []
-         sankeyTarget = []
-         sankeyValue = []
-         for key, val in dataDict.items():
-             sankeySource.append(eventList.index(key.split('+')[0]))
-             sankeyTarget.append(eventList.index(key.split('+')[1]))
-             sankeyValue.append(val)
- 
-         sankeyColor = []
-         for i in sankeyLabel:
-             sankeyColor.append('#' + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)]))
- 
-         # Updated Sankey configuration with font properties
-             data = go.Sankey(
-         arrangement = "snap",
-         node = dict(
-             pad = 15,
-             thickness = 20,
-             line = dict(color = "black", width = 0.5),
-             label = sankeyLabel,
-             color = sankeyColor
-         ),
-         link = dict(
-             source = sankeySource,
-             target = sankeyTarget,
-             value = sankeyValue,
-             color = 'light grey'
-         ),
-         textfont = dict(
-             family = "Arial",
-             size = 14,
-             color = "black"
-         )
-     )
-         
-         fig = go.Figure(data)
-         fig.update_layout(
-             hovermode='closest',
-             title=dict(
-                 text=title_text,
-                 font=dict(size=20, family="Arial", color="black")
-             ),
-             plot_bgcolor='white',
-             paper_bgcolor='white',
-             font=dict(
-                 family="Arial",
-                 size=14,
-                 color="black"
-             )
-         )
-         st.plotly_chart(fig)
- 
-     else:
-         st.write("Invalid direction.")
+    elif direction == "no_direction":
+        dataDict = defaultdict(int)
+        for index, row in npath_pandas.iterrows():
+            pathCnt = row['COUNT']
+            rowList = [item.strip() for item in row['PATH'].split(',')]
+            for i in range(len(rowList) - 1):
+                leftValue = rowList[i] + str(i)
+                rightValue = rowList[i + 1] + str(i + 1)
+                valuePair = leftValue + '+' + rightValue
+                dataDict[valuePair] += pathCnt
+
+        eventList = []
+        for key in dataDict.keys():
+            leftValue, rightValue = key.split('+')
+            if leftValue not in eventList:
+                eventList.append(leftValue)
+            if rightValue not in eventList:
+                eventList.append(rightValue)
+
+        sankeyLabel = [s[:-1] for s in eventList]
+        sankeySource = []
+        sankeyTarget = []
+        sankeyValue = []
+        for key, val in dataDict.items():
+            sankeySource.append(eventList.index(key.split('+')[0]))
+            sankeyTarget.append(eventList.index(key.split('+')[1]))
+            sankeyValue.append(val)
+
+        sankeyColor = []
+        for i in sankeyLabel:
+            sankeyColor.append('#' + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)]))
+
+        # Updated Sankey configuration with font properties
+        data = go.Sankey(
+            arrangement = "snap",
+            node = dict(
+                pad = 15,
+                thickness = 20,
+                line = dict(color = "black", width = 0.5),
+                label = sankeyLabel,
+                color = sankeyColor
+            ),
+            link = dict(
+                source = sankeySource,
+                target = sankeyTarget,
+                value = sankeyValue,
+                color = 'light grey'
+            ),
+            textfont = dict(
+                family = "Arial",
+                size = 14,
+                color = "black"
+            )
+        )
+        
+        fig = go.Figure(data)
+        fig.update_layout(
+            hovermode='closest',
+            title=dict(
+                text=title_text,
+                font=dict(size=20, family="Arial", color="black")
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            font=dict(
+                family="Arial",
+                size=14,
+                color="black"
+            )
+        )
+        st.plotly_chart(fig)
+
+    else:
+        st.write("Invalid direction.")
  
  #--------------------------------------
  #INTERACTIVE CLICKABLE SANKEY VIZ
@@ -329,7 +756,7 @@ def sankey_chart(df, direction="from",topN_percentage=100):
                  valuePair = leftValue + '+' + rightValue
                  dataDict[valuePair]["count"] += pathCnt
                  dataDict[valuePair]["uids"].extend(uid_list)
-                 #eventDict[leftValue] += pathCnt
+                 eventDict[leftValue] += pathCnt
                  eventDict[rightValue] += pathCnt
          # Step 1: Compute drop-offs and forward percentage
          for node in eventDict:
@@ -628,17 +1055,46 @@ def sigma_graph(df):
  #--------------------
  # Function to generate random colors for each event
 def generate_colors(events):
-     color_map = {}
-     for event in events:
-         color_map[event] = '#' + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
-     return color_map
+    # Use a consistent color palette similar to Altair's default scheme
+    # This ensures colors are consistent and match what users expect
+    altair_colors = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+        '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+        '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+    ]
+    
+    color_map = {}
+    events_list = sorted(list(events))  # Sort for consistency
+    for i, event in enumerate(events_list):
+        color_map[event] = altair_colors[i % len(altair_colors)]
+    return color_map
 # Build a hierarchical structure based on direction
 def build_hierarchy(paths, direction="from"):
     if direction == "to":
         # Reverse the order of the path for "to" visualization
-        paths = [(path.split(", ")[::-1], size) for path, size in paths]
+        processed_paths = []
+        for path, size in paths:
+            # Handle both comma-space and comma-only separators
+            if ", " in path:
+                events = path.split(", ")
+            else:
+                events = path.split(",")
+            events = [event.strip() for event in events]  # Strip whitespace
+            processed_paths.append((events[::-1], size))
+        paths = processed_paths
     else:
-        paths = [(path.split(", "), size) for path, size in paths]
+        processed_paths = []
+        for path, size in paths:
+            # Handle both comma-space and comma-only separators
+            if ", " in path:
+                events = path.split(", ")
+            else:
+                events = path.split(",")
+            events = [event.strip() for event in events]  # Strip whitespace
+            processed_paths.append((events, size))
+        paths = processed_paths
+    
     root = {"name": "", "children": [], "path": [], "value": 0}
     
     for parts, size in paths:
@@ -704,9 +1160,13 @@ def extract_events_and_count(df):
     for _, row in df.iterrows():
         path = row['PATH']
         size = row['COUNT']
-        path_events = path.split(", ")
+        # Handle both comma-space and comma-only separators
+        if ", " in path:
+            path_events = path.split(", ")
+        else:
+            path_events = path.split(",")
         for event in path_events:
-            events.add(event)
+            events.add(event.strip())  # Strip any extra whitespace
         total_count += size
 #Main function to generate Sunburst chart
 def process_and_generate_sunburst(df, direction="to"):
@@ -727,14 +1187,20 @@ def process_and_generate_sunburst(df, direction="to"):
         "tooltip": {
             "trigger": "item",
             "formatter": "{b}: {c}", 
-            "position": [0, 20], 
-            "extraCssText": "z-index: 10;"
+            "position": "function(point, params, dom, rect, size) { var x = point[0]; var y = point[1]; var viewWidth = size.viewSize[0]; var viewHeight = size.viewSize[1]; var boxWidth = size.contentSize[0]; var boxHeight = size.contentSize[1]; var posX = x + 20; var posY = y - boxHeight - 20; if (posX + boxWidth > viewWidth) { posX = x - boxWidth - 20; } if (posX < 0) { posX = 10; } if (posY < 0) { posY = y + 20; } return [posX, posY]; }",
+            "backgroundColor": "rgba(240, 242, 246, 0.5)",
+            "textStyle": {"color": "#0f0f0f", "fontSize": 12},
+            "borderColor": "#3b82f6",
+            "borderWidth": 1,
+            "padding": [8, 12],
+            "extraCssText": "max-width: 300px; white-space: normal; word-wrap: break-word; z-index: 9999;"
         },
         "series": [
             {
                 "type": "sunburst",
                 "data": echarts_data,
-                "radius": ["20%", "90%"],
+                "radius": ["20%", "80%"],
+                "center": ["50%", "60%"],
                 "label": {
                     "show": False
                 },
@@ -757,6 +1223,57 @@ def process_and_generate_sunburst(df, direction="to"):
             st.markdown(f"<span style='color:{color};font-weight:normal'>■</span> {event}", unsafe_allow_html=True)
         
         col_idx = (col_idx + 1) % 3
+
+# Modified function to generate Sunburst chart with consistent colors
+def process_and_generate_sunburst_with_colors(df, direction="to", color_map=None):
+    # Use the EXACT same logic as the working analyze tab version
+    extract_events_and_count(df)
+    
+    # Use the provided color_map instead of generating new colors
+    if color_map is None:
+        color_map = generate_colors(events)
+    
+    #Build hierarchy with the correct path order
+    paths = [(row['PATH'], row['COUNT']) for _, row in df.iterrows()]
+    hierarchy = build_hierarchy(paths, direction)
+    
+    #Convert hierarchy to ECharts format
+    echarts_data = convert_to_echarts_format(hierarchy, color_map, total_count, direction)[0]["children"]
+    
+    #Sunburst chart configuration with improved tooltip
+    sunburst_options = {
+        "tooltip": {
+            "trigger": "item",
+            "formatter": "function(params) { return params.name + ': ' + params.value + '<br/>Percentage: ' + params.percent + '%'; }",
+            "position": "function(point, params, dom, rect, size) { var x = point[0]; var y = point[1]; var viewWidth = size.viewSize[0]; var viewHeight = size.viewSize[1]; var boxWidth = size.contentSize[0]; var boxHeight = size.contentSize[1]; var posX = x + 20; var posY = y - boxHeight - 20; if (posX + boxWidth > viewWidth) { posX = x - boxWidth - 20; } if (posX < 0) { posX = 10; } if (posY < 0) { posY = y + 20; } return [posX, posY]; }",
+            "backgroundColor": "rgba(240, 242, 246, 0.5)",
+            "textStyle": {"color": "#0f0f0f", "fontSize": 12},
+            "borderColor": "#3b82f6",
+            "borderWidth": 1,
+            "padding": [8, 12],
+            "extraCssText": "max-width: 300px; white-space: normal; word-wrap: break-word; z-index: 9999;"
+        },
+        "series": [
+            {
+                "type": "sunburst",
+                "data": echarts_data,
+                "radius": ["20%", "80%"],
+                "center": ["50%", "60%"],
+                "label": {
+                    "show": False
+                },
+                "itemStyle": {
+                    "borderColor": "#fff",
+                    "borderWidth": 1
+                },
+                "highlightPolicy": "ancestor",
+            }
+        ]
+    }
+    
+    # Display the Sunburst chart
+    st_echarts(options=sunburst_options, height="600px")
+
         # Get the current credentials
 session = get_active_session()
 #--------------------------------------
@@ -809,16 +1326,82 @@ st.markdown("""
     .custom-container-1 {
         padding: 10px 10px 10px 10px;
         border-radius: 10px;
-        background-color: #f0f2f6;  /* Light blue background f0f8ff */
-        border: 1px solid #29B5E8;  /* Blue border */
+        background-color: #f0f2f6 !important; 
+        border: none;  /* No border in light mode */
         margin-bottom: 20px;
+        transition: all 0.3s ease;
     }
+    
+    /* Dark mode support for Path Analysis */
+    @media (prefers-color-scheme: dark) {
+        .custom-container-1 {
+            background-color: transparent !important;
+            border: 1px solid #29B5E8 !important;
+        }
+        
+        .custom-container-1 h5 {
+            color: #29B5E8 !important;
+        }
+        
+        /* Custom styling for st.success and st.info in dark mode */
+        .stAlert[data-baseweb="notification"] {
+            background-color: transparent !important;
+            border: 1px solid #29B5E8 !important;
+        }
+        
+        .stAlert[data-baseweb="notification"] > div {
+            background-color: transparent !important;
+        }
+    }
+    
+    /* Custom styling for st.success and st.info */
+    .stAlert[data-baseweb="notification"] {
+        background-color: #f0f2f6 !important;
+    }
+    
+    .stAlert[data-baseweb="notification"] > div {
+        background-color: #f0f2f6 !important;
+    }
+    
+    /* Remove default icons and customize */
+    .stAlert .stAlert-content::before {
+        content: none !important;
+    }
+    
+    /* Custom check icon for success */
+    .stAlert[kind="success"] .stAlert-content::before {
+        content: "✅" !important;
+        margin-right: 8px !important;
+        display: inline !important;
+    }
+    
+    /* Remove info icon */
+    .stAlert[kind="info"] .stAlert-content::before {
+        content: "" !important;
+    }
+
+    /* Fix for st.container(border=True) */
+    div[data-testid="stVerticalBlock"] > div[style*="border"] {
+        border: 1px solid #d1d5db !important;
+        border-radius: 8px !important;
+        padding: 16px !important;
+        margin: 8px 0 !important;
+    }
+
+    /* Dark mode support for bordered containers */
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stVerticalBlock"] > div[style*="border"] {
+            border: 1px solid #29B5E8 !important;
+            background-color: transparent !important;
+        }
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown("""
     <div class="custom-container-1">
-        <h5 style="font-size: 18px; font-weight: normal; color: #29B5E8; margin-top: 0px; margin-bottom: -15px;">
+        <h5 style="font-size: 18px; font-weight: normal; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
             PATH ANALYSIS
         </h5>
     </div>
@@ -830,17 +1413,15 @@ tab1, tab2 = st.tabs(["Analyze", "Compare"])
 #ANALYZE TAB
 #--------------------------------------
 with tab1:
-    with st.expander("Input Parameters"):
+    with st.expander("Input Parameters", icon=":material/settings:"):
             
             # DATA SOURCE 
             st.markdown("""
         <h2 style='font-size: 14px; margin-bottom: 0px;'>Data Source</h2>
         <hr style='margin-top: -8px;margin-bottom: 5px;'>
         """, unsafe_allow_html=True)
-            # Get list of databases
-            sqldb = "SHOW DATABASES"
-            databases = session.sql(sqldb).collect()
-            db0 = pd.DataFrame(databases)
+            # Get list of databases (cached)
+            db0 = fetch_databases(session)
             
             col1, col2, col3 = st.columns(3)
             
@@ -849,11 +1430,9 @@ with tab1:
                 database = st.selectbox('Select Database', key='analyzedb', index=None, 
                                         placeholder="Choose from list...", options=db0['name'].unique())
             
-            # **Schema Selection (Only if a database is selected)**
+            # **Schema Selection (Only if a database is selected - cached)**
             if database:
-                sqlschemas = f"SHOW SCHEMAS IN DATABASE {database}"
-                schemas = session.sql(sqlschemas).collect()
-                schema0 = pd.DataFrame(schemas)
+                schema0 = fetch_schemas(session, database)
             
                 with col2:
                     schema = st.selectbox('Select Schema', key='analyzesch', index=None, 
@@ -861,15 +1440,9 @@ with tab1:
             else:
                 schema = None  # Prevents SQL execution
             
-            # **Table Selection (Only if a database & schema are selected)**
+            # **Table Selection (Only if a database & schema are selected - cached)**
             if database and schema:
-                sqltables = f"""
-                    SELECT TABLE_NAME 
-                    FROM {database}.INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_SCHEMA = '{schema}' AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
-                """
-                tables = session.sql(sqltables).collect()
-                table0 = pd.DataFrame(tables)
+                table0 = fetch_tables(session, database, schema)
             
                 with col3:
                     tbl = st.selectbox('Select Event Table or View', key='analyzetbl', index=None, 
@@ -878,17 +1451,9 @@ with tab1:
             else:
                 tbl = None  # Prevents SQL execution
             
-            # **Column Selection (Only if a database, schema, and table are selected)**
+            # **Column Selection (Only if a database, schema, and table are selected - cached)**
             if database and schema and tbl:
-                cols = f"""
-                    SELECT COLUMN_NAME
-                    FROM {database}.INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{tbl}'
-                    ORDER BY ORDINAL_POSITION;
-                """
-
-                colssql = session.sql(cols).collect()
-                colsdf = pd.DataFrame(colssql)
+                colsdf = fetch_columns(session, database, schema, tbl)
 
             col1, col2, col3 = st.columns([4,4,4])
             with col1:
@@ -912,21 +1477,13 @@ with tab1:
                     st.write("")
             else: display = evt
                 
-            #Get Distinct Events Of Interest from Event Table
+            #Get Distinct Events Of Interest from Event Table (cached)
             if (uid != None and evt != None and tmstp != None):
-            # Get Distinct Events Of Interest from Event Table
-                EOI = f"SELECT DISTINCT {evt} FROM {database}.{schema}.{tbl} ORDER BY {evt}"
-                        # Get start EOI :
-                start = session.sql(EOI).collect()
-            # Get end EOI :
-                end = session.sql(EOI).collect()
-            # Get excluded EOI :
-                excl =session.sql(EOI).collect()
-        
+                distinct_evt_df = fetch_distinct_values(session, database, schema, tbl, evt)
                 # Write query output in a pandas dataframe
-                startdf0 = pd.DataFrame(start)
-                enddf0 = pd.DataFrame(end)
-                excl0 =pd.DataFrame(excl)   
+                startdf0 = distinct_evt_df.copy()
+                enddf0 = distinct_evt_df.copy()
+                excl0 = distinct_evt_df.copy()
 
 
             #Add "any" to the distinct events list
@@ -949,7 +1506,7 @@ with tab1:
                 options_with_placeholder_from = ["🔍"] + startdf1[evt].unique().tolist()
                 options_with_placeholder_to = ["🔎"] + enddf1[evt].unique().tolist()
                     
-                col1, col2, col3,col4 = st.columns([4,4,2,2])
+                col1, col2, col3 = st.columns([1,1,1])
 
                 with col1:
                     frm = st.multiselect('Select events FROM:', options=options_with_placeholder_from[1:], default=[],help="Select one or more events of interest to visualize paths FROM the selected point(s). 'Any' matches all values.")
@@ -957,9 +1514,46 @@ with tab1:
                     #fromevt = filtered_frmevt.iloc[0, 0]
                     if frm != "🔍":
                         fromevt= ", ".join([f"'{value}'" for value in frm])
- 
                     else:
                         fromevt = None  # Set to None if the placeholder is still selected
+                        
+                    # Pattern approach pills under FROM column
+                    # Check if both FROM and TO are "Any" - disable Time Window for Any→Any
+                    both_any = (fromevt and fromevt.strip("'") == 'Any') and (toevt and toevt.strip("'") == 'Any') if 'toevt' in locals() else False
+                    
+                    if both_any:
+                        # Force Min/Max Events for Any→Any pattern
+                        st.info("ℹ️ Time Window not available for Any → Any patterns. Using Min/Max Events.")
+                        pattern_approach = "Min/Max Events"
+                    else:
+                        pattern_approach = st.pills("Pattern approach", ["Min/Max Events", "Time Window"], default="Min/Max Events", help="Choose between event count limits or time-based window filtering")
+                    
+                    # Show input controls below pills within the same column
+                    if pattern_approach == "Min/Max Events":
+                        # Min/Max events inputs in compact layout
+                        col_min, col_max = st.columns(2)
+                        with col_min:
+                            minnbbevt = st.number_input("Min # events", value=0, placeholder="Type a number...", help="Select the minimum number of events either preceding or following the event(s) of interest.")
+                        with col_max:
+                            maxnbbevt = st.number_input("Max # events", value=5, min_value=1, placeholder="Type a number...", help="Select the maximum number of events either preceding or following the event(s) of interest.")
+                        
+                        # Set lookback variables to None for traditional approach
+                        max_gap_value = None
+                        gap_unit = None
+                        use_lookback = False
+                        
+                    else:  # Time Window
+                        # Time window inputs in compact layout
+                        col_time, col_unit = st.columns(2)
+                        with col_time:
+                            max_gap_value = st.number_input("Time window", value=7, min_value=1, placeholder="Type a number...", help="Maximum time window for path pattern filtering")
+                        with col_unit:
+                            gap_unit = st.selectbox("Time unit", ["MINUTE", "HOUR", "DAY"], index=2, help="Select the time unit for the time window")
+                        
+                        # Set traditional variables for time window approach  
+                        minnbbevt = 0
+                        maxnbbevt = 999999  # Large number to effectively disable event count limits
+                        use_lookback = True
                
                 with col2:
                     to = st.multiselect('Select events TO:', options=options_with_placeholder_to[1:], default=[],help="Select one or more events of interest to visualize paths TO the selected point(s). 'Any' matches all values.")
@@ -967,15 +1561,12 @@ with tab1:
                     #toevt =filtered_toevt.iloc[0, 0]
                     if to != "🔎":
                         toevt = ", ".join([f"'{value}'" for value in to])
-    
                     else:
                         toevt = None  # Set to None if the placeholder is still selected
-                
                         
                 with col3:
-                    minnbbevt = st.number_input("Min # events", value=0, placeholder="Type a number...",help="Select the minimum number of events either preceding or following the event(s) of interest.")
-                with col4:
-                    maxnbbevt = st.number_input("Max # events", value=5, min_value=1, placeholder="Type a number...",help="Select the maximum number of events either preceding or following the event(s) of interest.")
+                    # Empty column for visual balance
+                    pass
                
                 col1, col2 = st.columns([5,10])
                 with col1:
@@ -1060,7 +1651,7 @@ with tab1:
     #FILTERS
     #--------------------------------------
 
-                #initialize sql_where_clause
+                # Initialize sql_where_clause - will be populated by filters if enabled
                 sql_where_clause = ""
 
                 with st.container():
@@ -1081,12 +1672,13 @@ with tab1:
                     with col3:
                         st.write("")
                 
+                    # Additional filters toggle inside the main filters container
                 # Ensure we have remaining columns before allowing additional filters
                 if not remaining_columns.empty:
                     col1, col2 = st.columns([5, 10])
                 
                     with col1:
-                        checkfilters = st.toggle("Additional filters", help="Apply one or many conditional filters to the input data used in the path and pattern analysis.")
+                        checkfilters = st.toggle("Additional filters", key="additional_filters_main", help="Apply one or many conditional filters to the input data used in the path and pattern analysis.")
                     with col2:
                         st.write("")    
                 else:
@@ -1094,115 +1686,160 @@ with tab1:
                 
                 # Only execute filter logic if there are available columns AND the toggle is enabled
                 if checkfilters and not remaining_columns.empty:
-                
                     with st.container():
-                        # Helper function to fetch distinct values from a column
-                        def fetch_distinct_values(column):
-                            """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {database}.{schema}.{tbl}"
-                            result = session.sql(query).collect()
-                            distinct_values = [row[column] for row in result]
-                            return distinct_values
-                
-                        # Helper function to display operator selection based on column data type
-                        def get_operator_input(col_name, col_data_type, filter_index):
-                            """ Returns the operator for filtering based on column type """
-                            operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
-                
-                            if col_data_type in ['NUMBER', 'FLOAT', 'INT']:
-                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN'], key=operator_key)
-                            elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                operator = st.selectbox("Operator", ['<=', '>=', '='], key=operator_key)
-                            else:  # For string or categorical columns
-                                operator = st.selectbox("Operator", ['=', '!=', 'IN'], key=operator_key)
-                            return operator
-                
-                        # Helper function to display value input based on column data type
-                        def get_value_input(col_name, col_data_type, operator, filter_index):
-                            """ Returns the value for filtering based on column type """
-                            value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
-                
-                            if operator == 'IN':
-                                distinct_values = fetch_distinct_values(col_name)
-                                value = st.multiselect(f"Values for {col_name}", distinct_values, key=value_key)
-                            elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                value = st.date_input(f"Value for {col_name}", key=value_key)
-                            else:
-                                distinct_values = fetch_distinct_values(col_name)
-                                value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key)
-                
-                            return value
-                
-                        # Initialize variables to store filters and logical conditions
-                        filters = []
-                        logic_operator = None
-                        filter_index = 0
-                
-                        while True:
-                            available_columns = remaining_columns  # Columns available for filtering
-                
-                            if available_columns.empty:
-                                st.write("No more columns available for filtering.")
-                                break  # Stop the loop if no columns remain
-                
-                            # Create 3 columns for column selection, operator, and value input
-                            col1, col2, col3 = st.columns([2, 1, 2])
-                
-                            with col1:
-                                selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns)
-                
-                            # Determine column data type
-                            column_info_query = f"""
-                                SELECT DATA_TYPE
-                                FROM INFORMATION_SCHEMA.COLUMNS
-                                WHERE TABLE_NAME = '{tbl}' AND COLUMN_NAME = '{selected_column}';
-                            """
-                            column_info = session.sql(column_info_query).collect()
-                            col_data_type = column_info[0]['DATA_TYPE']  # Get the data type
-                
-                            with col2:
-                                operator = get_operator_input(selected_column, col_data_type, filter_index)
-                
-                            with col3:
-                                value = get_value_input(selected_column, col_data_type, operator, filter_index)
-                
-                            # Append filter if valid
-                            if operator and (value is not None or value == 0):
-                                filters.append((selected_column, operator, value))
-                
-                            # Ask user if they want another filter
-                            add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_{filter_index}")
-                
-                            if add_filter == 'Yes':
-                                col1, col2 = st.columns([2, 13])
-                                with col1: 
-                                    logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_{filter_index}")
-                                    filter_index += 1
+                            # Helper to get cached distinct values as a Python list
+                            def get_distinct_values_list(column):
+                                df_vals = fetch_distinct_values(session, database, schema, tbl, column)
+                                return df_vals.iloc[:, 0].tolist() if not df_vals.empty else []
+                    
+                            # Helper function to display operator selection based on column data type
+                            def get_operator_input(col_name, col_data_type, filter_index):
+                                """ Returns the operator for filtering based on column type """
+                                operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
+                    
+                                if col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                    operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                                elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
+                                    operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                                else:  # For string or categorical columns
+                                    operator = st.selectbox("Operator", ['=', '!=', 'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                                return operator
+                    
+                            # Helper function to display value input based on column data type
+                            def get_value_input(col_name, col_data_type, operator, filter_index):
+                                """ Returns the value for filtering based on column type """
+                                value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
+                    
+                                # Handle NULL operators - no value input needed
+                                if operator in ['IS NULL', 'IS NOT NULL']:
+                                    return None
+                                
+                                # Handle IN and NOT IN operators
+                                elif operator in ['IN', 'NOT IN']:
+                                    distinct_values = get_distinct_values_list(col_name)
+                                    value = st.multiselect(f"Values for {col_name}", distinct_values, key=value_key)
+                                    return value
+                                
+                                # Handle LIKE and NOT LIKE operators
+                                elif operator in ['LIKE', 'NOT LIKE']:
+                                    value = st.text_input(f"Pattern for {col_name} (use % for wildcards)", key=value_key, placeholder="e.g., %text% or prefix%")
+                                    return value
+                                
+                                # Handle date/timestamp columns
+                                elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
+                                    value = st.date_input(f"Value for {col_name}", key=value_key)
+                                    return value
+                                
+                                # Handle numeric columns with accept_new_options for manual input
+                                elif col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                    distinct_values = get_distinct_values_list(col_name)
+                                    value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key, accept_new_options=True)
+                                    return value
+                                
+                                # Handle other data types (strings, etc.)
+                                else:
+                                    distinct_values = get_distinct_values_list(col_name)
+                                    value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key)
+                                return value
+                    
+                            # Initialize variables to store filters and logical conditions
+                            filters = []
+                            logic_operator = None
+                            filter_index = 0
+                    
+                            while True:
+                                available_columns = remaining_columns  # Columns available for filtering
+                    
+                                if available_columns.empty:
+                                    st.write("No more columns available for filtering.")
+                                    break  # Stop the loop if no columns remain
+                    
+                                # Create 3 columns for column selection, operator, and value input
+                                col1, col2, col3 = st.columns([2, 1, 2])
+                    
+                                with col1:
+                                    selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns)
+                    
+                                # Determine column data type (cached)
+                                col_data_type = fetch_column_type(session, database, schema, tbl, selected_column)
+                    
                                 with col2:
-                                    st.write("")
-                            else:
-                                break
-                        
-                        # Generate SQL WHERE clause based on selected filters and logic
-                        sql_where_clause = " AND "
-                        #st.write(filters)
-                        for i, (col, operator, value) in enumerate(filters):
-                            if i > 0 and logic_operator:
-                                sql_where_clause += f" {logic_operator} "
+                                    operator = get_operator_input(selected_column, col_data_type, filter_index)
+                    
+                                with col3:
+                                    value = get_value_input(selected_column, col_data_type, operator, filter_index)
+                    
+                                # Append filter if valid
+                                if operator:
+                                    if operator in ['IS NULL', 'IS NOT NULL']:
+                                        filters.append((selected_column, operator, None))
+                                    elif operator in ['IN', 'NOT IN'] and value:
+                                        filters.append((selected_column, operator, value))
+                                    elif operator not in ['IS NULL', 'IS NOT NULL', 'IN', 'NOT IN'] and (value is not None and value != ''):
+                                        filters.append((selected_column, operator, value))
+                    
+                                # Ask user if they want another filter
+                                add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_{filter_index}")
+                    
+                                if add_filter == 'Yes':
+                                    col1, col2 = st.columns([2, 13])
+                                    with col1: 
+                                        logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_{filter_index}")
+                                        filter_index += 1
+                                    with col2:
+                                        st.write("")
+                                else:
+                                    break
                             
-                            if operator == 'IN':
-                                # Handle IN operator where the value is a list
-                                sql_where_clause += f"{col} IN {tuple(value)}"
-                            else:
-                                # Check if value is numeric
-                                    if isinstance(value, (int, float)):
-                                        sql_where_clause += f"{col} {operator} {value}"
+                            # Generate SQL WHERE clause based on selected filters and logic
+                            if filters:
+                                
+                                sql_where_clause = " AND "
+                                #st.write(filters)
+                                for i, (col, operator, value) in enumerate(filters):
+                                    if i > 0 and logic_operator:
+                                        sql_where_clause += f" {logic_operator} "
+                                    
+                                    # Handle NULL operators
+                                    if operator in ['IS NULL', 'IS NOT NULL']:
+                                        sql_where_clause += f"{col} {operator}"
+                                    
+                                    # Handle IN and NOT IN operators
+                                    elif operator in ['IN', 'NOT IN']:
+                                        if len(value) == 1:
+                                            # Single value - convert to = or != for better performance
+                                            single_op = '=' if operator == 'IN' else '!='
+                                            if isinstance(value[0], (int, float)):
+                                                sql_where_clause += f"{col} {single_op} {value[0]}"
+                                            else:
+                                                sql_where_clause += f"{col} {single_op} '{value[0]}'"
+                                        else:
+                                            # Multiple values - use proper IN/NOT IN with tuple
+                                            # Handle mixed types by converting all to strings for SQL safety
+                                            formatted_values = []
+                                            for v in value:
+                                                if isinstance(v, (int, float)):
+                                                    formatted_values.append(str(v))
+                                                else:
+                                                    formatted_values.append(f"'{v}'")
+                                            sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
+                                    
+                                    # Handle LIKE and NOT LIKE operators
+                                    elif operator in ['LIKE', 'NOT LIKE']:
+                                        sql_where_clause += f"{col} {operator} '{value}'"
+                                    
+                                    # Handle other operators (=, !=, <, <=, >, >=)
                                     else:
-                                 # For non-numeric values (strings, dates), enclose the value in quotes
-                                        sql_where_clause += f"{col} {operator} '{value}'"        
-                        else:
-                            st.write("")
-        
+                                        if isinstance(value, (int, float)):
+                                            sql_where_clause += f"{col} {operator} {value}"
+                                        else:
+                                            # For non-numeric values (strings, dates), enclose the value in quotes
+                                            sql_where_clause += f"{col} {operator} '{value}'"        
+                            
+                            else:
+                                # If no filters were created, ensure sql_where_clause is empty
+                                sql_where_clause = ""
+    
     # SQL LOGIC
     # Check pattern an run SQL accordingly
             
@@ -1222,26 +1859,58 @@ with tab1:
             # Aggregate results for plot
             if unitoftime==None and timeout ==None :
                 
-                path_to_agg_sql = f"""
-                select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
-                    select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
+                if use_lookback:
+                    # Lookback window approach for PATH TO (look back from TO event)
+                    path_to_agg_sql = f"""
+                    select path, count(*) as count,array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                        from (
+                            WITH TO_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({toevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as to_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM TO_EVENT_TIMES
+                                WHERE to_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, {tmstp}, to_event_time) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
                             {partitionby} 
                             order by {tmstp}  
                             measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
                             all rows per match
                             AFTER MATCH SKIP {overlap} 
-                            pattern(A{{{minnbbevt},{maxnbbevt}}} B)
+                            pattern(A* B)
                             define A as true, B AS {evt} IN({toevt}))
-                    {groupby} ) 
-                group by path order by count 
-                """
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
+                else:
+                    # Traditional min/max events approach
+                    path_to_agg_sql = f"""
+                    select path, count(*) as count,array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                            from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                                match_recognize(
+                                {partitionby} 
+                                order by {tmstp}  
+                                measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                                all rows per match
+                                AFTER MATCH SKIP {overlap} 
+                                pattern(A{{{minnbbevt},{maxnbbevt}}} B)
+                                define A as true, B AS {evt} IN({toevt}))
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
     
                 path_to_agg = session.sql(path_to_agg_sql).collect()
             elif unitoftime != None and timeout !=None :
                 path_to_agg_sql = f"""
-            select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
+            select path, count(*) as count,array_agg({uid}) as uid_list from (
                 select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
                     from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
@@ -1260,7 +1929,7 @@ with tab1:
                         pattern(A{{{minnbbevt},{maxnbbevt}}} B)
                         define A as true, B AS {evt} IN({toevt}))
                 {groupby} ) 
-            group by path order by count 
+            group by path order by count desc 
             """
             
                 path_to_agg = session.sql(path_to_agg_sql).collect()
@@ -1284,56 +1953,77 @@ with tab1:
                 
                 # Apply the function ONLY to UID_LIST while keeping other columns unchanged
                 res["UID_LIST"] = res["UID_LIST"].apply(convert_uid_list)
+                
+                # Store total counts before limiting
+                total_paths = len(res)
+                total_customers = res['COUNT'].sum()
+                
+                # Apply TOP N limit at pandas level
+                res = res.head(topn)
+                
+                # Show data summary for transparency
+                if not res.empty:
+                    displayed_paths = len(res)
+                    if total_paths <= topn:
+                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                    else:
+                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                else:
+                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                
                 # Create two columns for layout
-                col1, col2,col3 = st.columns([2,7,6])
+                col1, col2 = st.columns([2, 7])
             
                 # Place the toggle in the first column
                 with col1:
                     show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst.")
-                    #show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst. In the Tree diagram you can click on a node to select a specific path. Once a path is selected, it will be displayed, showing the sequence of events leading to or from the chosen point. To create a customer segment, expand the CREATE SEGMENT section, choose a database and schema from the available options and enter a segment table name where the user IDs will be stored. After configuring these details, create a new segment by clicking 'Create Segment' which will generate a new table and insert the selected user IDs, or append the selected IDs to an existing table by clicking 'Append to Segment'.")
 
-                
-                # Place the radio button in the second column, but only if the toggle is on
+                # Place the pills in the second column, but only if the toggle is on
                 with col2:
-                    if show_details:
+                    if 'show_details' in locals() and show_details:
                         genre = st.pills(
                             "Choose a visualization:",
                             ["Sankey","Tree", "Graph", "Sunburst"],
                             label_visibility="collapsed"
                         )
+                    else:
+                        genre = None
             
                 # Place the visualization outside of the columns layout
-                if show_details:
+                if show_details and genre:
                     if genre == 'Sankey':
+
+                        with st.container(border=True):
                         
-                        col1, col2 = st.columns([1, 2])
-                        with col1:
-                            percentage = st.slider("Display Top % of Paths", 1, 100, 100)
-                        with col2:
-                            st.write("")
-                      
-                        # STEP 2: Reset Session State on Query Change**
-                        current_df_hash = hash(res.to_json())
-                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
-                            st.session_state["last_df_hash"] = current_df_hash  # Update hash
-                            # Reset state variables
-                            st.session_state["clicked_sankey"] = None
-                            st.session_state["clicked_source"] = None
-                            st.session_state["clicked_target"] = None
-                            st.session_state["selected_uids"] = set()
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                            st.session_state["sankey_chart"] = None
-                            st.session_state["sankey_links"] = {}
-                            st.session_state["sankey_labels"] = []
-                            st.session_state["sortedEventList"] = []
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                percentage = st.slider("Display Top % of Paths", 1, 100, 100)
+                            with col2:
+                                st.write("")
+                        
+                            # STEP 2: Reset Session State on Query Change**
+                            current_df_hash = hash(res.to_json())
+                            if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                                st.session_state["last_df_hash"] = current_df_hash  # Update hash
+                                # Reset state variables
+                                st.session_state["clicked_sankey"] = None
+                                st.session_state["clicked_source"] = None
+                                st.session_state["clicked_target"] = None
+                                st.session_state["selected_uids"] = set()
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                                st.session_state["sankey_chart"] = None
+                                st.session_state["sankey_links"] = {}
+                                st.session_state["sankey_labels"] = []
+                                st.session_state["sortedEventList"] = []
+                                
+                                #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
+                            # Session state to store extracted user data
+                            if "selected_paths_df" not in st.session_state:
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
                             
-                            #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
-                        # Session state to store extracted user data
-                        if "selected_paths_df" not in st.session_state:
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                        
-                        clicked_sankey = sankey_chart(res, direction="to", topN_percentage=percentage)
-                        
+                            
+                            clicked_sankey = sankey_chart(res, direction="to", topN_percentage=percentage)
+                            
                         if clicked_sankey:
                             sankeyLabel = st.session_state.get("sankey_labels", [])
                             sortedEventList = st.session_state.get("sortedEventList", [])
@@ -1442,7 +2132,8 @@ with tab1:
                         #                     st.error(f"❌ Error executing SQL: {e}")
                     elif genre == 'Tree':
                         target_event = toevt.strip("'")
-                        clicked_node= plot_tree(res, target_event, "to")
+                        with st.container(border=True):
+                            clicked_node= plot_tree(res, target_event, "to")
                         if clicked_node:
                             selected_path = clicked_node["full_path"]  
                             selected_uids = clicked_node["uids"]  # Directly use cleaned UIDs
@@ -1451,7 +2142,7 @@ with tab1:
                             if direction == "to":
                                 selected_path = ", ".join(reversed(selected_path.split(", ")))  # Reverse only in "to" mode
                         
-                            st.write(f"🔀 Selected path: **{selected_path}**")
+                            st.write(f"Selected path: **{selected_path}**")
                             
                             with st.expander("CREATE SEGMENT"):  # Keep the form visible
                                 # **Fetch available databases**
@@ -1508,55 +2199,104 @@ with tab1:
                                             try:
                                                 session.sql(create_table_sql).collect()  # Create table
                                                 session.sql(insert_sql).collect()  # Insert UIDs
-                                                st.success(f"✅ Segment `{database}.{schema}.{table_name}` created successfully!")
+                                                st.success(f"Segment `{database}.{schema}.{table_name}` created successfully!")
                                             except Exception as e:
-                                                st.error(f"❌ Error executing SQL: {e}")
+                                                st.error(f"Error executing SQL: {e}", icon=":material/chat_error:")
                         
                                     with col5:
                                         st.markdown("<br>", unsafe_allow_html=True)
                                         if st.button("Append to Segment", use_container_width=True, help="Appends selected identifiers into an existing table"):
                                             try:
                                                 session.sql(insert_sql).collect()  # Insert UIDs only
-                                                st.success(f"✅ UIDs successfully appended to `{database}.{schema}.{table_name}`!")
+                                                st.success(f"UIDs successfully appended to `{database}.{schema}.{table_name}`!")
                                             except Exception as e:
-                                                st.error(f"❌ Error executing SQL: {e}")
+                                                st.error(f"Error executing SQL: {e}", icon=":material/chat_error:")
                                                 
                     elif genre == 'Graph':
-                        sigma_graph(res)
+                        with st.container(border=True):
+                            sigma_graph(res)
             
                     elif genre == 'Sunburst':
-                        process_and_generate_sunburst(res, direction="to")
+                        with st.container(border=True):
+                            process_and_generate_sunburst(res, direction="to")
 
-                if st.toggle ("Expl**AI**n Me!",help="Explain journeys and derive insights (summarize paths, describe behaviors and even suggest actions !) by leveraging Cortex AI and the interpretive and generative power of LLMs"):
-                                          # Create a temporary view for the aggregated results  
-                    prompt = st.text_input("Prompt your question", key="aisqlprompt")
-
-                    # Check if the prompt is valid
-                    if prompt and prompt != "None":
-                        try:
-                            # Step 1: Create a Snowpark DataFrame from res["PATH"]
-                            aipath_df = pd.DataFrame(res["PATH"], columns=["PATH"])
-                            aipath = session.create_dataframe(aipath_df)
-                    
-                            # Step 2: Apply the AI aggregation directly
-                            from snowflake.snowpark.functions import col, lit, call_function
-                    
-                            ai_result_df = aipath.select(
-                                call_function("AI_AGG", col("PATH"), lit(prompt)).alias("AI_RESPONSE")
+                # AI-Powered Insights with model selection (only show if toggle is on)
+                if 'show_details' in locals() and show_details:
+                    def path_ai_analysis_callback(selected_model, prompt_type):
+                        """Callback function for path analysis AI insights"""
+                        
+                        # Show custom prompt input if Custom is selected
+                        if prompt_type == "Custom":
+                            custom_prompt = st.text_area(
+                                "Enter your custom prompt:",
+                                value="",
+                                key="path_to_custom_prompt",
+                                help="Enter your custom analysis prompt. The path data will be automatically included.",
+                                placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
                             )
+                            
+                            # Only proceed if custom prompt is not empty
+                            if not custom_prompt or custom_prompt.strip() == "":
+                                st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
+                                return
+                        
+                        with st.spinner("Generating AI insights..."):
+                            try:
+                                # Use the same number of paths as selected by user (topn)
+                                top_paths = res.head(topn)
+                                paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
+                                                for _, row in top_paths.iterrows()])
+                                
+                                if prompt_type == "Auto":
+                                    ai_prompt = f"""
+                                    Analyze these top {topn} customer journey paths:
+                                    
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    
+                                    Please provide insights on:
+                                    1. Most significant customer journey patterns
+                                    2. User behavior implications 
+                                    3. Potential optimization opportunities
+                                    4. Anomalies or interesting findings
+                                    
+                                    Keep your analysis concise and actionable.
+                                    """
+                                else:  # Custom
+                                    ai_prompt = f"""
+                                    {custom_prompt}
+                                    
+                                    Data to analyze - Top {topn} customer journey paths:
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    """
+                                
+                                # Use selected model for Snowflake Cortex analysis
+                                ai_sql = f"""
+                                SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                                    '{selected_model}',
+                                    '{ai_prompt.replace("'", "''")}'
+                                ) as insights
+                                """
+                                
+                                ai_result = session.sql(ai_sql).collect()
+                                if ai_result:
+                                    insights = ai_result[0]['INSIGHTS']
+                                    
+                                    st.markdown("**AI-Generated Insights**")
+                                    st.markdown(insights)
                     
-                            # Step 3: Collect and display result
-                            explain = ai_result_df.to_pandas()
+                            except Exception as e:
+                                st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
                     
-                            message = st.chat_message("assistant")
-                            if not explain.empty:
-                                formatted_output = explain.iloc[0, 0]
-                                message.markdown(f"**AI Response:**\n\n{formatted_output}")
-                            else:
-                                message.markdown("No results found for the given prompt.")
-                    
-                        except Exception as e:
-                            st.error(f"An error occurred: {e}")                    
+                    # Display AI insights section with model selection
+                    ai_model, ai_enabled, prompt_type = display_ai_insights_section(
+                        "path_to_ai", 
+                        "Select the LLM model for AI analysis of path results",
+                        ai_content_callback=path_ai_analysis_callback
+                    )
                 
                 # View Aggregated Paths SQL
                 if st.toggle("View SQL for Aggregated Paths"):    
@@ -1566,18 +2306,47 @@ with tab1:
                     # Individual Paths SQL
                 if unitoftime==None and timeout ==None :
                     
-                    path_to_det_sql = f"""
-                    select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
-                        define A as true, B AS {evt} IN ({toevt})
-                    )  {groupby} """
+                    if use_lookback:
+                        # Lookback window approach for PATH TO detailed paths (look back from TO event)
+                        path_to_det_sql = f"""
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                        from (
+                            WITH TO_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({toevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as to_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM TO_EVENT_TIMES
+                                WHERE to_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, {tmstp}, to_event_time) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A* B) 
+                            define A as true, B AS {evt} IN ({toevt})
+                        ) {groupby} """
+                    else:
+                        # Traditional min/max events approach for detailed paths
+                        path_to_det_sql = f"""
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                            from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                            match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
+                            define A as true, B AS {evt} IN ({toevt})
+                        )  {groupby} """
         
                     # Run the SQL
                     path_to_det_df = session.sql(path_to_det_sql).collect()
@@ -1634,28 +2403,60 @@ with tab1:
             # Aggregate results for Sankey plot
             if unitoftime==None and timeout ==None :
                 
-                path_frm_agg_sql = f"""
-                select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
-                    select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
+                if use_lookback:
+                    # Look-forward window approach for PATH FROM (from specific event forward in time)
+                    path_frm_agg_sql = f"""
+                    select path, count(*) as count,array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                        from (
+                            WITH FROM_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM FROM_EVENT_TIMES
+                                WHERE from_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
                             {partitionby} 
                             order by {tmstp}  
                             measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
                             all rows per match
                             AFTER MATCH SKIP {overlap} 
-                            pattern(A B{{{minnbbevt},{maxnbbevt}}})
+                            pattern(A B*)
                             define A AS {evt} IN ({fromevt}), B as true)
-                    {groupby} ) 
-                group by path order by count 
-                """
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
+                else:
+                    # Traditional min/max events approach for PATH FROM
+                    path_frm_agg_sql = f"""
+                    select path, count(*) as count,array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                            from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                                match_recognize(
+                                {partitionby} 
+                                order by {tmstp}  
+                                measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                                all rows per match
+                                AFTER MATCH SKIP {overlap} 
+                                pattern(A B{{{minnbbevt},{maxnbbevt}}})
+                                define A AS {evt} IN ({fromevt}), B as true)
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
     
                 path_frm_agg = session.sql(path_frm_agg_sql).collect()
                 
             elif unitoftime != None and timeout !=None :
                  
                 path_frm_agg_sql = f"""
-                select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
+                select path, count(*) as count,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
@@ -1673,7 +2474,7 @@ with tab1:
                             pattern(A B{{{minnbbevt},{maxnbbevt}}})
                             define A AS {evt} IN ({fromevt}), B as true)
                     {groupby} ) 
-                group by path order by count 
+                group by path order by count desc 
                 """
     
                 path_frm_agg = session.sql(path_frm_agg_sql).collect()
@@ -1694,28 +2495,48 @@ with tab1:
                 
                 # Apply the function ONLY to UID_LIST while keeping other columns unchanged
                 res["UID_LIST"] = res["UID_LIST"].apply(convert_uid_list)
+                
+                # Store total counts before limiting
+                total_paths = len(res)
+                total_customers = res['COUNT'].sum()
+                
+                # Apply TOP N limit at pandas level
+                res = res.head(topn)
+                
+                # Show data summary for transparency
+                if not res.empty:
+                    displayed_paths = len(res)
+                    if total_paths <= topn:
+                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                    else:
+                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                else:
+                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                
                 # Create two columns for layout
-                col1, col2,col3 = st.columns([2,7,6])
+                col1, col2 = st.columns([2, 7])
             
                 # Place the toggle in the first column
                 with col1:
-                    show_details = st.toggle("Show me!", help= "Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst.")
-                    #show_details = st.toggle("Show me!", help= "Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst. In the Tree diagram you can click on a node to select a specific path. Once a path is selected, it will be displayed, showing the sequence of events leading to or from the chosen point. To create a customer segment, expand the CREATE SEGMENT section, choose a database and schema from the available options and enter a segment table name where the user IDs will be stored. After configuring these details, create a new segment by clicking 'Create Segment' which will generate a new table and insert the selected user IDs, or append the selected IDs to an existing table by clicking 'Append to Segment'.")
+                    show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Tree, Forced Layout Graph or Sunburst.")
 
-                # Place the radio button in the second column, but only if the toggle is on
+                # Place the pills in the second column, but only if the toggle is on
                 with col2:
-                    if show_details:
+                    if 'show_details' in locals() and show_details:
                         genre = st.pills(
                             "Choose a visualization:",
                             ["Sankey", "Tree", "Graph", "Sunburst"],
                             label_visibility="collapsed"
                         )
+                    else:
+                        genre = None
             
                 # Place the visualization outside of the columns layout
-                if show_details:
+                if show_details and genre:
                     if genre == 'Tree':
                         target_event = fromevt.strip("'")
-                        clicked_node= plot_tree(res, target_event, "from")
+                        with st.container(border=True):
+                            clicked_node= plot_tree(res, target_event, "from")
                         if clicked_node:
                             selected_path = clicked_node["full_path"]  
                             selected_uids = clicked_node["uids"]  # Directly use cleaned UIDs
@@ -1777,47 +2598,47 @@ with tab1:
                                             try:
                                                 session.sql(create_table_sql).collect()  # Create table
                                                 session.sql(insert_sql).collect()  # Insert UIDs
-                                                st.success(f"✅ Segment `{database}.{schema}.{table_name}` created successfully!")
+                                                st.success(f"Segment `{database}.{schema}.{table_name}` created successfully!")
                                             except Exception as e:
-                                                st.error(f"❌ Error executing SQL: {e}")
+                                                st.error(f"Error executing SQL: {e}",icon=":material/error:")
                         
                                     with col5:
                                         st.markdown("<br>", unsafe_allow_html=True)
                                         if st.button("Append to Segment", use_container_width=True, help="Appends selected identifiers into an existing table"):
                                             try:
                                                 session.sql(insert_sql).collect()  # Insert UIDs only
-                                                st.success(f"✅ UIDs successfully appended to `{database}.{schema}.{table_name}`!")
+                                                st.success(f"UIDs successfully appended to `{database}.{schema}.{table_name}`!")
                                             except Exception as e:
-                                                st.error(f"❌ Error executing SQL: {e}")
+                                                st.error(f"Error executing SQL: {e}", icon=":material/chat_error:")
                     
                     elif genre == 'Sankey':
-                        
-                        col1, col2 = st.columns([1, 2])
-                        with col1:
-                            percentage = st.slider("Display Top % of Paths", 1, 100, 100)
-                        with col2:
-                            st.write("")                        
-                         # 🔹 **STEP 2: Reset Session State on Query Change**
-                        current_df_hash = hash(res.to_json())
-                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
-                            st.session_state["last_df_hash"] = current_df_hash  # Update hash
-                            # Reset state variables
-                            st.session_state["clicked_sankey"] = None
-                            st.session_state["clicked_source"] = None
-                            st.session_state["clicked_target"] = None
-                            st.session_state["selected_uids"] = set()
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                            st.session_state["sankey_chart"] = None
-                            st.session_state["sankey_links"] = {}
-                            st.session_state["sankey_labels"] = []
-                            st.session_state["sortedEventList"] = []
+                        with st.container(border=True):
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                percentage = st.slider("Display Top % of Paths", 1, 100, 100)
+                            with col2:
+                                st.write("")                        
+                            # 🔹 **STEP 2: Reset Session State on Query Change**
+                            current_df_hash = hash(res.to_json())
+                            if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                                st.session_state["last_df_hash"] = current_df_hash  # Update hash
+                                # Reset state variables
+                                st.session_state["clicked_sankey"] = None
+                                st.session_state["clicked_source"] = None
+                                st.session_state["clicked_target"] = None
+                                st.session_state["selected_uids"] = set()
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                                st.session_state["sankey_chart"] = None
+                                st.session_state["sankey_links"] = {}
+                                st.session_state["sankey_labels"] = []
+                                st.session_state["sortedEventList"] = []
+                                
+                                #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
+                            # Session state to store extracted user data
+                            if "selected_paths_df" not in st.session_state:
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
                             
-                            #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
-                        # Session state to store extracted user data
-                        if "selected_paths_df" not in st.session_state:
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                        
-                        clicked_sankey = sankey_chart(res, direction="from", topN_percentage=percentage)
+                            clicked_sankey = sankey_chart(res, direction="from", topN_percentage=percentage)
                         
                         if clicked_sankey:
                             sankeyLabel = st.session_state.get("sankey_labels", [])
@@ -1925,41 +2746,90 @@ with tab1:
                         #                 except Exception as e:
                         #                     st.error(f"❌ Error executing SQL: {e}")
                     elif genre == 'Graph':
-                        sigma_graph(res)
+                        with st.container(border=True):
+                            sigma_graph(res)
             
                     elif genre == 'Sunburst':
-                        process_and_generate_sunburst(res, direction="from")
+                        with st.container(border=True):
+                            process_and_generate_sunburst(res, direction="from")
                         
-            if st.toggle ("Expl**AI**n Me!",help="Explain journeys and derive insights (summarize paths, describe behaviors and even suggest actions !) by leveraging Cortex AI and the interpretive and generative power of LLMs"):
-                                          # Create a temporary view for the aggregated results  
-                    prompt = st.text_input("Prompt your question", key="aisqlprompt")
-
-                    # Check if the prompt is valid
-                    if prompt and prompt != "None":
+            # AI-Powered Insights with model selection (only show if toggle is on)
+            if 'show_details' in locals() and show_details:
+                def path_ai_analysis_callback(selected_model, prompt_type):
+                    """Callback function for path analysis AI insights"""
+                    
+                    # Show custom prompt input if Custom is selected
+                    if prompt_type == "Custom":
+                        custom_prompt = st.text_area(
+                            "Enter your custom prompt:",
+                            value="",
+                            key="path_from_custom_prompt",
+                            help="Enter your custom analysis prompt. The path data will be automatically included.",
+                            placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
+                        )
+                        
+                        # Only proceed if custom prompt is not empty
+                        if not custom_prompt or custom_prompt.strip() == "":
+                            st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
+                            return
+                    
+                    with st.spinner("Generating AI insights..."):
                         try:
-                            # Step 1: Create a Snowpark DataFrame from res["PATH"]
-                            aipath_df = pd.DataFrame(res["PATH"], columns=["PATH"])
-                            aipath = session.create_dataframe(aipath_df)
-                    
-                            # Step 2: Apply the AI aggregation directly
-                            from snowflake.snowpark.functions import col, lit, call_function
-                    
-                            ai_result_df = aipath.select(
-                                call_function("AI_AGG", col("PATH"), lit(prompt)).alias("AI_RESPONSE")
-                            )
-                    
-                            # Step 3: Collect and display result
-                            explain = ai_result_df.to_pandas()
-                    
-                            message = st.chat_message("assistant")
-                            if not explain.empty:
-                                formatted_output = explain.iloc[0, 0]
-                                message.markdown(f"**AI Response:**\n\n{formatted_output}")
-                            else:
-                                message.markdown("No results found for the given prompt.")
+                            # Use the same number of paths as selected by user (topn)
+                            top_paths = res.head(topn)
+                            paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
+                                                    for _, row in top_paths.iterrows()])
+                            
+                            if prompt_type == "Auto":
+                                ai_prompt = f"""
+                                Analyze these top {topn} customer journey paths:
+                                
+                                {paths_text}
+                                
+                                Total Paths Found: {len(res)}
+                                
+                                Please provide insights on:
+                                1. Most significant customer journey patterns
+                                2. User behavior implications 
+                                3. Potential optimization opportunities
+                                4. Anomalies or interesting findings
+                                
+                                Keep your analysis concise and actionable.
+                                """
+                            else:  # Custom
+                                ai_prompt = f"""
+                                {custom_prompt}
+                                
+                                Data to analyze - Top {topn} customer journey paths:
+                                {paths_text}
+                                
+                                Total Paths Found: {len(res)}
+                                """
+                            
+                            # Use selected model for Snowflake Cortex analysis
+                            ai_sql = f"""
+                            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                                '{selected_model}',
+                                '{ai_prompt.replace("'", "''")}'
+                            ) as insights
+                            """
+                            
+                            ai_result = session.sql(ai_sql).collect()
+                            if ai_result:
+                                insights = ai_result[0]['INSIGHTS']
+                                
+                                st.markdown("**AI-Generated Insights**")
+                                st.markdown(insights)
                     
                         except Exception as e:
-                            st.error(f"An error occurred: {e}")  
+                            st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
+                
+                # Display AI insights section with model selection
+                ai_model, ai_enabled, prompt_type = display_ai_insights_section(
+                    "path_from_ai", 
+                    "Select the LLM model for AI analysis of path results",
+                    ai_content_callback=path_ai_analysis_callback
+                )  
                             
                 # View Aggregated Paths SQL
             if st.toggle("View SQL for Aggregated Paths"):     
@@ -1968,18 +2838,48 @@ with tab1:
             if st.toggle("View Detailed Individual Paths"):
             # Individual Paths SQL
                 if unitoftime==None and timeout ==None :
-                    path_frm_det_sql = f"""
-                    select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A B{{{minnbbevt},{maxnbbevt}}}) 
-                        define B as true, A AS {evt} IN ({fromevt})
-                    )  {groupby} """
+                    
+                    if use_lookback:
+                        # Look-forward window approach for PATH FROM detailed paths
+                        path_frm_det_sql = f"""
+                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
+                        from (
+                            WITH FROM_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM FROM_EVENT_TIMES
+                                WHERE from_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A B*) 
+                            define A AS {evt} IN ({fromevt}), B as true
+                        ) {groupby} """
+                    else:
+                        # Traditional min/max events approach for PATH FROM detailed paths
+                        path_frm_det_sql = f"""
+                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                            match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A B{{{minnbbevt},{maxnbbevt}}}) 
+                            define B as true, A AS {evt} IN ({fromevt})
+                        )  {groupby} """
                     
                     # Run the SQL
                     path_frm_det_df = session.sql(path_frm_det_sql).collect()
@@ -2033,28 +2933,60 @@ with tab1:
             # Aggregate results for Sankey plot
             if unitoftime==None and timeout ==None :
                 
-                path_betw_agg_sql = f"""
-                select top {topn} path, count(*) as count, array_agg({uid}) as uid_list from (
-                    select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
+                if use_lookback:
+                    # Look-forward window approach for PATH BETWEEN (from specific event to specific event within time window)
+                    path_betw_agg_sql = f"""
+                    select path, count(*) as count, array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                        from (
+                            WITH FROM_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM FROM_EVENT_TIMES
+                                WHERE from_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
                             {partitionby} 
                             order by {tmstp}  
                             measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
                             all rows per match
                             AFTER MATCH SKIP {overlap} 
-                            pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
+                            pattern(A X* B) 
                             define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt}))
-                    {groupby} ) 
-                group by path order by count 
-                """
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
+                else:
+                    # Traditional min/max events approach for PATH BETWEEN
+                    path_betw_agg_sql = f"""
+                    select path, count(*) as count, array_agg({uid}) as uid_list from (
+                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                            from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                                match_recognize(
+                                {partitionby} 
+                                order by {tmstp}  
+                                measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                                all rows per match
+                                AFTER MATCH SKIP {overlap} 
+                                pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
+                                define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt}))
+                        {groupby} ) 
+                    group by path order by count desc 
+                    """
               
                 path_betw_agg = session.sql(path_betw_agg_sql).collect()
                 
             elif unitoftime != None and timeout !=None :
                  
                 path_betw_agg_sql = f"""
-                select top {topn} path, count(*) as count, array_agg({uid}) as uid_list from (
+                select path, count(*) as count, array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW
@@ -2072,7 +3004,7 @@ with tab1:
                             pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
                             define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt}))
                     {groupby} ) 
-                group by path order by count 
+                group by path order by count desc 
                 """
                
                 path_betw_agg = session.sql(path_betw_agg_sql).collect()
@@ -2092,50 +3024,80 @@ with tab1:
                 
                 # Apply the function ONLY to UID_LIST while keeping other columns unchanged
                 res["UID_LIST"] = res["UID_LIST"].apply(convert_uid_list)
+                
+                # Store total counts before limiting
+                total_paths = len(res)
+                total_customers = res['COUNT'].sum()
+                
+                # Apply TOP N limit at pandas level
+                res = res.head(topn)
+                
+                # Show data summary for transparency
+                if not res.empty:
+                    displayed_paths = len(res)
+                    if total_paths <= topn:
+                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                    else:
+                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                else:
+                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                
                 # Create two columns for layout
-                col1, col2 = st.columns([1, 3])
+                col1, col2 = st.columns([2, 7])
             
                 # Place the toggle in the first column
                 with col1:
                     show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Forced Layout Graph or Sunburst")
             
-                # Place the radio button in the second column, but only if the toggle is on
+                # Place the pills in the second column, but only if the toggle is on
                 with col2:
-                    if show_details:
+                    if 'show_details' in locals() and show_details:
                         genre = st.pills(
                             "Choose a visualization:",
                             ["Sankey", "Graph", "Sunburst"],
                             label_visibility="collapsed"
                         )
+                    else:
+                        genre = None
                 # Place the visualization outside of the columns layout
-                if show_details:
+                if show_details and genre:
             
                     if genre == 'Graph':
-                        sigma_graph(res)
+                        with st.container(border=True):
+                            sigma_graph(res)
                     
                     elif genre == 'Sankey':
 
-                         # 🔹 **STEP 2: Reset Session State on Query Change**
-                        current_df_hash = hash(res.to_json())
-                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
-                            st.session_state["last_df_hash"] = current_df_hash  # Update hash
-                            # Reset state variables
-                            st.session_state["clicked_sankey"] = None
-                            st.session_state["clicked_source"] = None
-                            st.session_state["clicked_target"] = None
-                            st.session_state["selected_uids"] = set()
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                            st.session_state["sankey_chart"] = None
-                            st.session_state["sankey_links"] = {}
-                            st.session_state["sankey_labels"] = []
-                            st.session_state["sortedEventList"] = []
-                            
-                            #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
-                        # Session state to store extracted user data
-                        if "selected_paths_df" not in st.session_state:
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                        with st.container(border=True):
                         
-                        clicked_sankey = sankey_chart(res, direction="to")
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                percentage = st.slider("Display Top % of Paths", 1, 100, 100)
+                            with col2:
+                                st.write("")
+                        
+                            # STEP 2: Reset Session State on Query Change**
+                            current_df_hash = hash(res.to_json())
+                            if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                                st.session_state["last_df_hash"] = current_df_hash  # Update hash
+                                # Reset state variables
+                                st.session_state["clicked_sankey"] = None
+                                st.session_state["clicked_source"] = None
+                                st.session_state["clicked_target"] = None
+                                st.session_state["selected_uids"] = set()
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                                st.session_state["sankey_chart"] = None
+                                st.session_state["sankey_links"] = {}
+                                st.session_state["sankey_labels"] = []
+                                st.session_state["sortedEventList"] = []
+                                
+                                #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
+                            # Session state to store extracted user data
+                            if "selected_paths_df" not in st.session_state:
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                            
+                            
+                            clicked_sankey = sankey_chart(res, direction="to", topN_percentage=percentage)
                         
                         if clicked_sankey:
                             sankeyLabel = st.session_state.get("sankey_labels", [])
@@ -2245,38 +3207,86 @@ with tab1:
                         #                     st.error(f"❌ Error executing SQL: {e}")
             
                     elif genre == 'Sunburst':
-                        process_and_generate_sunburst(res, direction="to")
+                        with st.container(border=True):
+                            process_and_generate_sunburst(res, direction="to")
                         
-            if st.toggle ("Expl**AI**n Me!",help="Explain journeys and derive insights (summarize paths, describe behaviors and even suggest actions !) by leveraging Cortex AI and the interpretive and generative power of LLMs"):
-                                          # Create a temporary view for the aggregated results  
-                    prompt = st.text_input("Prompt your question", key="aisqlprompt")
-
-                    # Check if the prompt is valid
-                    if prompt and prompt != "None":
+            # AI-Powered Insights with model selection (only show if toggle is on)
+            if 'show_details' in locals() and show_details:
+                def path_ai_analysis_callback(selected_model, prompt_type):
+                    """Callback function for path analysis AI insights"""
+                    
+                    # Show custom prompt input if Custom is selected
+                    if prompt_type == "Custom":
+                        custom_prompt = st.text_area(
+                            "Enter your custom prompt:",
+                            value="",
+                            key="path_between_custom_prompt",
+                            help="Enter your custom analysis prompt. The path data will be automatically included.",
+                            placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
+                        )
+                        
+                        # Only proceed if custom prompt is not empty
+                        if not custom_prompt or custom_prompt.strip() == "":
+                            st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
+                            return
+                    
+                    with st.spinner("Generating AI insights..."):
                         try:
-                            # Step 1: Create a Snowpark DataFrame from res["PATH"]
-                            aipath_df = pd.DataFrame(res["PATH"], columns=["PATH"])
-                            aipath = session.create_dataframe(aipath_df)
-                    
-                            # Step 2: Apply the AI aggregation directly
-                            from snowflake.snowpark.functions import col, lit, call_function
-                    
-                            ai_result_df = aipath.select(
-                                call_function("AI_AGG", col("PATH"), lit(prompt)).alias("AI_RESPONSE")
-                            )
-                    
-                            # Step 3: Collect and display result
-                            explain = ai_result_df.to_pandas()
-                    
-                            message = st.chat_message("assistant")
-                            if not explain.empty:
-                                formatted_output = explain.iloc[0, 0]
-                                message.markdown(f"**AI Response:**\n\n{formatted_output}")
-                            else:
-                                message.markdown("No results found for the given prompt.")
+                            # Use the same number of paths as selected by user (topn)
+                            top_paths = res.head(topn)
+                            paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
+                                                    for _, row in top_paths.iterrows()])
+                            
+                            if prompt_type == "Auto":
+                                ai_prompt = f"""
+                                Analyze these top {topn} customer journey paths:
+                                
+                                {paths_text}
+                                
+                                Total Paths Found: {len(res)}
+                                
+                                Please provide insights on:
+                                1. Most significant customer journey patterns
+                                2. User behavior implications 
+                                3. Potential optimization opportunities
+                                4. Anomalies or interesting findings
+                                
+                                Keep your analysis concise and actionable.
+                                """
+                            else:  # Custom
+                                ai_prompt = f"""
+                                {custom_prompt}
+                                
+                                Data to analyze - Top {topn} customer journey paths:
+                                {paths_text}
+                                
+                                Total Paths Found: {len(res)}
+                                """
+                            
+                            # Use selected model for Snowflake Cortex analysis
+                            ai_sql = f"""
+                            SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                                '{selected_model}',
+                                '{ai_prompt.replace("'", "''")}'
+                            ) as insights
+                            """
+                            
+                            ai_result = session.sql(ai_sql).collect()
+                            if ai_result:
+                                insights = ai_result[0]['INSIGHTS']
+                                
+                                st.markdown("**AI-Generated Insights**")
+                                st.markdown(insights)
                     
                         except Exception as e:
-                            st.error(f"An error occurred: {e}")                  
+                            st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
+                
+                # Display AI insights section with model selection
+                ai_model, ai_enabled, prompt_type = display_ai_insights_section(
+                    "path_between_ai", 
+                    "Select the LLM model for AI analysis of path results",
+                    ai_content_callback=path_ai_analysis_callback
+                )                  
                 # View Aggregated Paths SQL
             if st.toggle("View SQL for Aggregated Paths"):      
                 st.code(path_betw_agg_sql, language='sql')
@@ -2284,18 +3294,48 @@ with tab1:
             if st.toggle("View Detailed Individual Paths"):
         # Individual Paths SQL
                 if unitoftime==None and timeout ==None :
-                    path_betw_det_sql = f"""
-                    select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
-                        define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
-                    )  {groupby} """
+                    
+                    if use_lookback:
+                        # Look-forward window approach for PATH BETWEEN detailed paths
+                        path_betw_det_sql = f"""
+                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
+                        from (
+                            WITH FROM_EVENT_TIMES AS (
+                                SELECT {uid}, {tmstp}, {evt},
+                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
+                                FROM {database}.{schema}.{tbl} 
+                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
+                            ),
+                            TIME_WINDOWED AS (
+                                SELECT {uid}, {tmstp}, {evt}
+                                FROM FROM_EVENT_TIMES
+                                WHERE from_event_time IS NOT NULL 
+                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
+                            )
+                            SELECT * FROM TIME_WINDOWED
+                        ) match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A X* B) 
+                            define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
+                        ) {groupby} """
+                    else:
+                        # Traditional min/max events approach for PATH BETWEEN detailed paths
+                        path_betw_det_sql = f"""
+                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
+                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                            match_recognize(
+                            {partitionby} 
+                            order by {tmstp} 
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap}
+                            pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
+                            define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
+                        )  {groupby} """
                     
                     # Run the SQL
                     path_betw_det_df = session.sql(path_betw_det_sql).collect()
@@ -2341,7 +3381,7 @@ with tab1:
             
 
         elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
-            st.warning("This is tuple generator")
+            st.warning("This is tuple generator",icon=":material/warning:")
             
             path_tupl_agg=None
             path_tupl_agg_sql=None
@@ -2349,7 +3389,7 @@ with tab1:
             # Aggregate results for Sankey plot
             if unitoftime==None and timeout ==None :
                 path_tupl_agg_sql = f"""
-                select top {topn} path, count(*) as count,array_agg({uid}) as uid_list from (
+                select path, count(*) as count,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ) as path
                         from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                             match_recognize(
@@ -2361,13 +3401,13 @@ with tab1:
                             pattern(A{{{minnbbevt},{maxnbbevt}}}) 
                             define  A as true)
                     {groupby} ) 
-                group by path order by count 
+                group by path order by count desc 
                 """
                 path_tupl_agg = session.sql(path_tupl_agg_sql).collect()
                 
             elif unitoftime != None and timeout !=None :
                 path_tupl_agg_sql = f"""
-                select top {topn} path, count(*) as count ,array_agg({uid}) as uid_list from (
+                select path, count(*) as count ,array_agg({uid}) as uid_list from (
                     select {uid},  listagg({display}, ', ') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
@@ -2383,57 +3423,87 @@ with tab1:
                             pattern(A{{{minnbbevt},{maxnbbevt}}}) 
                             define  A as true)
                     {groupby} ) 
-                group by path order by count 
+                group by path order by count desc 
                 """
                 path_tupl_agg = session.sql(path_tupl_agg_sql).collect()
                     # If the DataFrame is not empty, show Sankey plot
             res = pd.DataFrame(path_tupl_agg)
             if not res.empty:
+                import ast
+                
+                def convert_uid_list(uid_entry):
+                    if isinstance(uid_entry, str):
+                        try:
+                            return ast.literal_eval(uid_entry)  # Safely convert string to list
+                        except (SyntaxError, ValueError):
+                            return []  # Return empty list if conversion fails
+                    return uid_entry  # Already a list, return as is
+                
+                # Apply the function ONLY to UID_LIST while keeping other columns unchanged
+                res["UID_LIST"] = res["UID_LIST"].apply(convert_uid_list)
+                
+                # Store total counts before limiting
+                total_paths = len(res)
+                total_customers = res['COUNT'].sum()
+                
+                # Apply TOP N limit at pandas level
+                res = res.head(topn)
+                
+                # Show data summary for transparency
+                displayed_paths = len(res)
+                if total_paths <= topn:
+                    st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                else:
+                    st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                
                 # Create two columns for layout
-                col1, col2 = st.columns([1, 3])
+                col1, col2 = st.columns([2, 7])
             
                 # Place the toggle in the first column
                 with col1:
                     show_details = st.toggle("Show me!", help="Select a visualization option: Sankey, Forced Layout Graph or Sunburst")
             
-                # Place the radio button in the second column, but only if the toggle is on
+                # Place the pills in the second column, but only if the toggle is on
                 with col2:
-                    if show_details:
+                    if 'show_details' in locals() and show_details:
                         genre = st.pills(
                             "Choose a visualization:",
                             ["Sankey", "Graph", "Sunburst"],
                             label_visibility="collapsed"
                         )
+                    else:
+                        genre = None
             
                 # Place the visualization outside of the columns layout
-                if show_details:
+                if show_details and genre:
                     if genre == 'Sankey':
-                        col1, col2 = st.columns([1, 2])
-                        with col1:
-                            sli = st.slider("Path Count Filter", 0, topn, topn)
-                        with col2:
-                            st.write("")
-                        #sankeyPlot(res, "to", "", sli)
-                        current_df_hash = hash(res.to_json())
-                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
-                            st.session_state["last_df_hash"] = current_df_hash  # Update hash
-                            # Reset state variables
-                            st.session_state["clicked_sankey"] = None
-                            st.session_state["clicked_source"] = None
-                            st.session_state["clicked_target"] = None
-                            st.session_state["selected_uids"] = set()
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                            st.session_state["sankey_chart"] = None
-                            st.session_state["sankey_links"] = {}
-                            st.session_state["sankey_labels"] = []
-                            st.session_state["sortedEventList"] = []
+                        with st.container(border=True):
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                sli = st.slider("Path Count Filter", 0, topn, topn)
+                            with col2:
+                                st.write("")
+                            #sankeyPlot(res, "to", "", sli)
+                            current_df_hash = hash(res.to_json())
+                            if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                                st.session_state["last_df_hash"] = current_df_hash  # Update hash
+                                # Reset state variables
+                                st.session_state["clicked_sankey"] = None
+                                st.session_state["clicked_source"] = None
+                                st.session_state["clicked_target"] = None
+                                st.session_state["selected_uids"] = set()
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
+                                st.session_state["sankey_chart"] = None
+                                st.session_state["sankey_links"] = {}
+                                st.session_state["sankey_labels"] = []
+                                st.session_state["sortedEventList"] = []
+                                
+                                #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
+                            # Session state to store extracted user data
+                            if "selected_paths_df" not in st.session_state:
+                                st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
                             
-                            #st.info("ℹ️ **Query executed! Resetting selections & memory.**")
-                        # Session state to store extracted user data
-                        if "selected_paths_df" not in st.session_state:
-                            st.session_state["selected_paths_df"] = pd.DataFrame(columns=["Source", "Target", "User_IDs"])
-                        
-                        clicked_sankey = sankey_chart(res, direction="to")
+                            clicked_sankey = sankey_chart(res, direction="to")
                         
                         if clicked_sankey:
                             sankeyLabel = st.session_state.get("sankey_labels", [])
@@ -2543,10 +3613,12 @@ with tab1:
                         #                     st.error(f"❌ Error executing SQL: {e}")
             
                     elif genre == 'Graph':
-                        sigma_graph(res)
+                        with st.container(border=True):
+                            sigma_graph(res)
             
                     elif genre == 'Sunburst':
-                        process_and_generate_sunburst(res, direction="from")
+                        with st.container(border=True):
+                            process_and_generate_sunburst(res, direction="from")
      
                 
         else:
@@ -2557,7 +3629,7 @@ with tab1:
     .custom-container-1 {
         padding: 10px 10px 10px 10px;
         border-radius: 10px;
-        background-color: #f0f2f6;  /* Light blue background f0f8ff */
+        background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
         border: none;  /* Blue border */
         margin-bottom: 20px;
     }
@@ -2566,7 +3638,7 @@ with tab1:
 
         st.markdown("""
     <div class="custom-container-1">
-        <h5 style="font-size: 14px; font-weight: 200 ; color: #29B5E8; margin-top: 0px; margin-bottom: -15px;">
+        <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
             Please ensure all required inputs are selected before running the app.
         </h5>
     </div>
@@ -2583,7 +3655,7 @@ with tab1:
 # UNION : Define two target sets and compare importance of events for each set
 
 with tab2:
-    with st.expander("Comparison Mode"):
+    with st.expander("Comparison Mode", icon=":material/compare:"):
         st.caption("**Complement Mode**(default mode): This mode focuses on ensemble-based analysis by comparing a population defined by a (**Reference**) set of paths against everything outside of it.")
         st.caption("**Union Mode**: This mode performs a comparative analysis between two defined (**Reference**) and (**Compared**) sets of paths (i.e., populations), accounting for any potential overlap.")
         mode=st.radio(
@@ -2593,7 +3665,7 @@ with tab2:
            label_visibility="collapsed"
 )
         
-    with st.expander("Input Parameters (Reference)"):
+    with st.expander("Input Parameters (Reference)", icon=":material/settings:"):
             
             # DATA SOURCE 
             st.markdown("""
@@ -2601,10 +3673,8 @@ with tab2:
         <hr style='margin-top: -8px;margin-bottom: 5px;'>
         """, unsafe_allow_html=True)
             
-            # Get list of databases
-            sqldb = "SHOW DATABASES"
-            databases = session.sql(sqldb).collect()
-            db0 = pd.DataFrame(databases)
+            # Get list of databases (cached)
+            db0 = fetch_databases(session)
             
             col1, col2, col3 = st.columns(3)
             
@@ -2613,11 +3683,9 @@ with tab2:
                 database = st.selectbox('Select Database', key='comparerefdb', index=None, 
                                         placeholder="Choose from list...", options=db0['name'].unique())
             
-            # **Schema Selection (Only if a database is selected)**
+            # **Schema Selection (Only if a database is selected - cached)**
             if database:
-                sqlschemas = f"SHOW SCHEMAS IN DATABASE {database}"
-                schemas = session.sql(sqlschemas).collect()
-                schema0 = pd.DataFrame(schemas)
+                schema0 = fetch_schemas(session, database)
             
                 with col2:
                     schema = st.selectbox('Select Schema', key='comparerefsch', index=None, 
@@ -2625,15 +3693,9 @@ with tab2:
             else:
                 schema = None  # Prevents SQL execution
             
-            # **Table Selection (Only if a database & schema are selected)**
+            # **Table Selection (Only if a database & schema are selected - cached)**
             if database and schema:
-                sqltables = f"""
-                    SELECT TABLE_NAME 
-                    FROM {database}.INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_SCHEMA = '{schema}' AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
-                """
-                tables = session.sql(sqltables).collect()
-                table0 = pd.DataFrame(tables)
+                table0 = fetch_tables(session, database, schema)
             
                 with col3:
                     tbl = st.selectbox('Select Event Table or View', key='comparereftbl', index=None, 
@@ -2642,17 +3704,9 @@ with tab2:
             else:
                 tbl = None  # Prevents SQL execution
             
-            # **Column Selection (Only if a database, schema, and table are selected)**
+            # **Column Selection (Only if a database, schema, and table are selected - cached)**
             if database and schema and tbl:
-                cols = f"""
-                    SELECT COLUMN_NAME
-                    FROM {database}.INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = '{schema}' AND TABLE_NAME = '{tbl}'
-                    ORDER BY ORDINAL_POSITION;
-                """
-
-                colssql = session.sql(cols).collect()
-                colsdf = pd.DataFrame(colssql)
+                colsdf = fetch_columns(session, database, schema, tbl)
 
             col1, col2, col3 = st.columns([4,4,4])
             with col1:
@@ -2662,21 +3716,13 @@ with tab2:
             with col3:
                 tmstp = st.selectbox('Select timestamp column', colsdf, index=None, key='tsmtpcompareref',placeholder="Choose from list...",help="The timestamp column contains the timestamp associated to the event. This is the value that will be used for sequentially ordering the dataset.")
             
-            #Get Distinct Events Of Interest from Event Table
+            #Get Distinct Events Of Interest from Event Table (cached)
             if (uid != None and evt != None and tmstp != None):
-            # Get Distinct Events Of Interest from Event Table
-                EOI = f"SELECT DISTINCT {evt} FROM {database}.{schema}.{tbl} ORDER BY {evt}"
-                        # Get start EOI :
-                start = session.sql(EOI).collect()
-            # Get end EOI :
-                end = session.sql(EOI).collect()
-            # Get excluded EOI :
-                excl =session.sql(EOI).collect()
-        
+                distinct_evt_df = fetch_distinct_values(session, database, schema, tbl, evt)
                 # Write query output in a pandas dataframe
-                startdf0 = pd.DataFrame(start)
-                enddf0 = pd.DataFrame(end)
-                excl0 =pd.DataFrame(excl)   
+                startdf0 = distinct_evt_df.copy()
+                enddf0 = distinct_evt_df.copy()
+                excl0 = distinct_evt_df.copy()
 
 
             #Add "any" to the distinct events list
@@ -2841,41 +3887,59 @@ with tab2:
                 if checkfilters and not remaining_columns.empty:
                 
                     with st.container():
-                        # Helper function to fetch distinct values from a column
-                        def fetch_distinct_values(column):
-                            """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {database}.{schema}.{tbl}"
-                            result = session.sql(query).collect()
-                            distinct_values = [row[column] for row in result]
-                            return distinct_values
+                        # Helper to get cached distinct values
+                        def get_distinct_values_list(column):
+                            df_vals = fetch_distinct_values(session, database, schema, tbl, column)
+                            return df_vals.iloc[:, 0].tolist() if not df_vals.empty else []
                 
                         # Helper function to display operator selection based on column data type
                         def get_operator_input(col_name, col_data_type, filter_index):
                             """ Returns the operator for filtering based on column type """
-                            operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
+                            operator_key = f"{col_name}_operator_ref_{filter_index}"  # Ensure unique key
                 
-                            if col_data_type in ['NUMBER', 'FLOAT', 'INT']:
-                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN'], key=operator_key)
+                            if col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                operator = st.selectbox("Operator", ['<=', '>=', '='], key=operator_key)
+                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             else:  # For string or categorical columns
-                                operator = st.selectbox("Operator", ['=', '!=', 'IN'], key=operator_key)
+                                operator = st.selectbox("Operator", ['=', '!=', 'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             return operator
                 
                         # Helper function to display value input based on column data type
                         def get_value_input(col_name, col_data_type, operator, filter_index):
                             """ Returns the value for filtering based on column type """
-                            value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
-                
-                            if operator == 'IN':
-                                distinct_values = fetch_distinct_values(col_name)
+                            value_key = f"{col_name}_value_ref_{filter_index}"  # Ensure unique key
+
+                            # Handle NULL operators - no value input needed
+                            if operator in ['IS NULL', 'IS NOT NULL']:
+                                return None
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator in ['IN', 'NOT IN']:
+                                distinct_values = get_distinct_values_list(col_name)
                                 value = st.multiselect(f"Values for {col_name}", distinct_values, key=value_key)
+                                return value
+                            
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator in ['LIKE', 'NOT LIKE']:
+                                value = st.text_input(f"Pattern for {col_name} (use % for wildcards)", key=value_key, placeholder="e.g., %text% or prefix%")
+                                return value
+                            
+                            # Handle date/timestamp columns
                             elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
                                 value = st.date_input(f"Value for {col_name}", key=value_key)
+                                return value
+                            
+                            # Handle numeric columns with accept_new_options for manual input
+                            elif col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                distinct_values = get_distinct_values_list(col_name)
+                                value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key, accept_new_options=True)
+                                return value
+                            
+                            # Handle other data types (strings, etc.)
                             else:
-                                distinct_values = fetch_distinct_values(col_name)
+                                distinct_values = get_distinct_values_list(col_name)
                                 value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key)
-                
                             return value
                 
                         # Initialize variables to store filters and logical conditions
@@ -2894,16 +3958,10 @@ with tab2:
                             col1, col2, col3 = st.columns([2, 1, 2])
                 
                             with col1:
-                                selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns)
+                                selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns, key=f"column_filter_ref_{filter_index}")
                 
-                            # Determine column data type
-                            column_info_query = f"""
-                                SELECT DATA_TYPE
-                                FROM INFORMATION_SCHEMA.COLUMNS
-                                WHERE TABLE_NAME = '{tbl}' AND COLUMN_NAME = '{selected_column}';
-                            """
-                            column_info = session.sql(column_info_query).collect()
-                            col_data_type = column_info[0]['DATA_TYPE']  # Get the data type
+                            # Determine column data type (cached)
+                            col_data_type = fetch_column_type(session, database, schema, tbl, selected_column)
                 
                             with col2:
                                 operator = get_operator_input(selected_column, col_data_type, filter_index)
@@ -2912,16 +3970,21 @@ with tab2:
                                 value = get_value_input(selected_column, col_data_type, operator, filter_index)
                 
                             # Append filter if valid
-                            if operator and (value is not None or value == 0):
-                                filters.append((selected_column, operator, value))
+                            if operator:
+                                if operator in ['IS NULL', 'IS NOT NULL']:
+                                    filters.append((selected_column, operator, None))
+                                elif operator in ['IN', 'NOT IN'] and value:
+                                    filters.append((selected_column, operator, value))
+                                elif operator not in ['IS NULL', 'IS NOT NULL', 'IN', 'NOT IN'] and (value is not None and value != ''):
+                                    filters.append((selected_column, operator, value))
                 
                             # Ask user if they want another filter
-                            add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_{filter_index}")
+                            add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_ref_{filter_index}")
                 
                             if add_filter == 'Yes':
                                 col1, col2 = st.columns([2, 13])
                                 with col1: 
-                                    logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_{filter_index}")
+                                    logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_ref_{filter_index}")
                                     filter_index += 1
                                 with col2:
                                     st.write("")
@@ -2929,37 +3992,61 @@ with tab2:
                                 break
                         
                         # Generate SQL WHERE clause based on selected filters and logic
-                        sql_where_clause = " AND "
+                        if filters:
+                            sql_where_clause = " AND "
                         #st.write(filters)
                         for i, (col, operator, value) in enumerate(filters):
                             if i > 0 and logic_operator:
                                 sql_where_clause += f" {logic_operator} "
                             
-                            if operator == 'IN':
-                                # Handle IN operator where the value is a list
-                                sql_where_clause += f"{col} IN {tuple(value)}"
+                            # Handle NULL operators
+                            if operator in ['IS NULL', 'IS NOT NULL']:
+                                sql_where_clause += f"{col} {operator}"
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator in ['IN', 'NOT IN']:
+                                if len(value) == 1:
+                                    # Single value - convert to = or != for better performance
+                                    single_op = '=' if operator == 'IN' else '!='
+                                    if isinstance(value[0], (int, float)):
+                                        sql_where_clause += f"{col} {single_op} {value[0]}"
+                                    else:
+                                        sql_where_clause += f"{col} {single_op} '{value[0]}'"
+                                else:
+                                    # Multiple values - use proper IN/NOT IN with tuple
+                                    # Handle mixed types by converting all to strings for SQL safety
+                                    formatted_values = []
+                                    for v in value:
+                                        if isinstance(v, (int, float)):
+                                            formatted_values.append(str(v))
+                                        else:
+                                            formatted_values.append(f"'{v}'")
+                                    sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
+                            
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator in ['LIKE', 'NOT LIKE']:
+                                sql_where_clause += f"{col} {operator} '{value}'"
+                            
+                            # Handle other operators (=, !=, <, <=, >, >=)
                             else:
-                                # Check if value is numeric
                                     if isinstance(value, (int, float)):
                                         sql_where_clause += f"{col} {operator} {value}"
                                     else:
                                  # For non-numeric values (strings, dates), enclose the value in quotes
                                         sql_where_clause += f"{col} {operator} '{value}'"        
                         else:
-                            st.write("")
+                            sql_where_clause = ""
     if mode == "Union":
         
-        with st.expander ("Input Parameters (Compared)"):
+        with st.expander ("Input Parameters (Compared)", icon=":material/settings:"):
             # DATA SOURCE FOR SECOND INSTANCE
             st.markdown("""
             <h2 style='font-size: 14px; margin-bottom: 0px;'>Data Source</h2>
             <hr style='margin-top: -8px;margin-bottom: 5px;'>
             """, unsafe_allow_html=True)
             
-             # Get list of databases
-            sqldb1 = "SHOW DATABASES"
-            databases1 = session.sql(sqldb1).collect()
-            db01 = pd.DataFrame(databases1)
+            # Get list of databases (cached)
+            db01 = fetch_databases(session)
             
             col1, col2, col3 = st.columns(3)
             
@@ -2968,11 +4055,9 @@ with tab2:
                 database1 = st.selectbox('Select Database', key='comparecompdb', index=None, 
                                         placeholder="Choose from list...", options=db01['name'].unique())
             
-            # **Schema Selection (Only if a database is selected)**
+            # **Schema Selection (Only if a database is selected - cached)**
             if database1:
-                sqlschemas1 = f"SHOW SCHEMAS IN DATABASE {database1}"
-                schemas1 = session.sql(sqlschemas1).collect()
-                schema01 = pd.DataFrame(schemas1)
+                schema01 = fetch_schemas(session, database1)
             
                 with col2:
                     schema1 = st.selectbox('Select Schema', key='comparecompsch', index=None, 
@@ -2980,15 +4065,9 @@ with tab2:
             else:
                 schema1 = None  # Prevents SQL execution
             
-            # **Table Selection (Only if a database & schema are selected)**
+            # **Table Selection (Only if a database & schema are selected - cached)**
             if database1 and schema1:
-                sqltables1 = f"""
-                    SELECT TABLE_NAME 
-                    FROM {database1}.INFORMATION_SCHEMA.TABLES
-                    WHERE TABLE_SCHEMA = '{schema1}' AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
-                """
-                tables1 = session.sql(sqltables1).collect()
-                table01 = pd.DataFrame(tables1)
+                table01 = fetch_tables(session, database1, schema1)
             
                 with col3:
                     tbl1 = st.selectbox('Select Event Table or View', key='comparecomptbl', index=None, 
@@ -2997,17 +4076,9 @@ with tab2:
             else:
                 tbl1 = None  # Prevents SQL execution
             
-            # **Column Selection (Only if a database, schema, and table are selected)**
-            if database1 and schema and tbl1:
-                cols1 = f"""
-                    SELECT COLUMN_NAME
-                    FROM {database1}.INFORMATION_SCHEMA.COLUMNS
-                    WHERE TABLE_SCHEMA = '{schema1}' AND TABLE_NAME = '{tbl1}'
-                    ORDER BY ORDINAL_POSITION;
-                """
-
-                colssql1 = session.sql(cols1).collect()
-                colsdf1 = pd.DataFrame(colssql1)
+            # **Column Selection (Only if a database, schema, and table are selected - cached)**
+            if database1 and schema1 and tbl1:
+                colsdf1 = fetch_columns(session, database1, schema1, tbl1)
             
             col4, col5, col6 = st.columns([4,4,4])
             with col4:
@@ -3017,21 +4088,13 @@ with tab2:
             with col6:
                 tmstp1 = st.selectbox('Select timestamp column', colsdf1, index=None, key='tsmtpcomparecomp',placeholder="Choose from list...",help="The timestamp column contains the timestamp associated to the event. This is the value that will be used for sequentially ordering the dataset.")
             
-            # Get Distinct Events Of Interest from Event Table
+            # Get Distinct Events Of Interest from Event Table (cached)
             if (uid1 is not None and evt1 is not None and tmstp1 is not None):
-                # Get Distinct Events Of Interest from Event Table
-                EOI1 = f"SELECT DISTINCT {evt1} FROM {database1}.{schema1}.{tbl1} ORDER BY {evt1}"
-                # Get start EOI :
-                start1 = session.sql(EOI1).collect()
-                # Get end EOI :
-                end1 = session.sql(EOI1).collect()
-                # Get excluded EOI :
-                excl1 = session.sql(EOI1).collect()
-            
+                distinct_evt_df1 = fetch_distinct_values(session, database1, schema1, tbl1, evt1)
                 # Write query output in a pandas dataframe
-                startdf1_instance = pd.DataFrame(start1)
-                enddf1_instance = pd.DataFrame(end1)
-                excl0_instance = pd.DataFrame(excl1)
+                startdf1_instance = distinct_evt_df1.copy()
+                enddf1_instance = distinct_evt_df1.copy()
+                excl0_instance = distinct_evt_df1.copy()
             
                 # Add "any" to the distinct events list
                 any_row_instance = {evt1: 'Any'}
@@ -3189,44 +4252,59 @@ with tab2:
                 
                 #if checkfilters1:
                     with st.container():
-                        # Helper function to fetch distinct values from a column
-                        def fetch_distinct_values_instance(column):
-                            """Query the distinct values for a column, except for dates"""
-                            query = f"SELECT DISTINCT {column} FROM {database1}.{schema1}.{tbl1}"
-                            result = session.sql(query).collect()
-                            distinct_values = [row[column] for row in result]
-                            return distinct_values
+                        # Helper function to get cached distinct values for compared instance
+                        def get_distinct_values_list_instance(column):
+                            df_vals = fetch_distinct_values(session, database1, schema1, tbl1, column)
+                            return df_vals.iloc[:, 0].tolist() if not df_vals.empty else []
             
                         # Helper function to display operator selection based on column data type
                         def get_operator_input_instance(col_name, col_data_type, filter_index):
                             """ Returns the operator for filtering based on column type """
-                            operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
+                            operator_key = f"{col_name}_operator_comp_{filter_index}"  # Ensure unique key
             
-                            if col_data_type in ['NUMBER', 'FLOAT', 'INT']:
-                                operator = st.selectbox(f"Operator (Comp)", ['=', '<', '<=', '>', '>=', '!=', 'IN'], key=operator_key)
+                            if col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                operator = st.selectbox(f"Operator (Comp)", ['=', '<', '<=', '>', '>=', '!=', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                operator = st.selectbox(f"Operator (Comp)", ['<=', '>=', '='], key=operator_key)
+                                operator = st.selectbox(f"Operator (Comp)", ['=', '<', '<=', '>', '>=', '!=', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             else:  # For string or categorical columns
-                                operator = st.selectbox(f"Operator (Comp)", ['=', '!=', 'IN'], key=operator_key)
+                                operator = st.selectbox(f"Operator (Comp)", ['=', '!=', 'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'], key=operator_key)
                             return operator
             
                         # Helper function to display value input based on column data type
                         def get_value_input_instance(col_name, col_data_type, operator, filter_index):
                             """ Returns the value for filtering based on column type """
-                            value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
+                            value_key = f"{col_name}_value_comp_{filter_index}"  # Ensure unique key
             
-                            if operator == 'IN':
-                                # For IN operator, allow multiple value selection
-                                distinct_values = fetch_distinct_values_instance(col_name)
+                            # Handle NULL operators - no value input needed
+                            if operator in ['IS NULL', 'IS NOT NULL']:
+                                return None
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator in ['IN', 'NOT IN']:
+                                distinct_values = get_distinct_values_list_instance(col_name)
                                 value = st.multiselect(f"Values for {col_name} (Comp)", distinct_values, key=value_key)
+                                return value
+                            
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator in ['LIKE', 'NOT LIKE']:
+                                value = st.text_input(f"Pattern for {col_name} (Comp) (use % for wildcards)", key=value_key, placeholder="e.g., %text% or prefix%")
+                                return value
+                            
+                            # Handle date/timestamp columns
                             elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                # For date columns, let the user input a date value
                                 value = st.date_input(f"Value for {col_name} (Comp)", key=value_key)
+                                return value
+                            
+                            # Handle numeric columns with accept_new_options for manual input
+                            elif col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                distinct_values = get_distinct_values_list_instance(col_name)
+                                value = st.selectbox(f"Value for {col_name} (Comp)", distinct_values, key=value_key, accept_new_options=True)
+                                return value
+                            
+                            # Handle other data types (strings, etc.)
                             else:
-                                # For other operators, allow single value selection from distinct values
-                                distinct_values = fetch_distinct_values_instance(col_name)
+                                distinct_values = get_distinct_values_list_instance(col_name)
                                 value = st.selectbox(f"Value for {col_name} (Comp)", distinct_values, key=value_key)
-            
                             return value
             
                         # Initialize variables to store filters and logical conditions
@@ -3246,16 +4324,10 @@ with tab2:
                             col1, col2, col3 = st.columns([2, 1, 2])
             
                             with col1:
-                                selected_column_instance = st.selectbox(f"Column (Filter {filter_index_instance + 1} - Comp)", available_columns1)
+                                selected_column_instance = st.selectbox(f"Column (Filter {filter_index_instance + 1} - Comp)", available_columns1, key=f"column_filter_comp_{filter_index_instance}")
             
-                            # Determine column data type by querying the INFORMATION_SCHEMA
-                            column_info_query1 = f"""
-                                SELECT DATA_TYPE
-                                FROM INFORMATION_SCHEMA.COLUMNS
-                                WHERE TABLE_NAME = '{tbl1}' AND COLUMN_NAME = '{selected_column_instance}';
-                            """
-                            column_info_instance = session.sql(column_info_query1).collect()
-                            col_data_type_instance = column_info_instance[0]['DATA_TYPE']
+                            # Determine column data type (cached)
+                            col_data_type_instance = fetch_column_type(session, database1, schema1, tbl1, selected_column_instance)
             
                             with col2:
                                 operator_instance = get_operator_input_instance(selected_column_instance, col_data_type_instance, filter_index_instance)
@@ -3263,15 +4335,23 @@ with tab2:
                             with col3:
                                 value_instance = get_value_input_instance(selected_column_instance, col_data_type_instance, operator_instance, filter_index_instance)
             
-                            if operator_instance and (value_instance is not None or value_instance == 0):
-                                filters_instance.append((selected_column_instance, operator_instance, value_instance))
+                            # Append filter as a tuple (column, operator, value)
+                            # For NULL operators, value is None and that's expected
+                            # For other operators, we need a valid value (except for empty lists in IN/NOT IN)
+                            if operator_instance:
+                                if operator_instance in ['IS NULL', 'IS NOT NULL']:
+                                    filters_instance.append((selected_column_instance, operator_instance, None))
+                                elif operator_instance in ['IN', 'NOT IN'] and value_instance:  # Must have at least one value for IN/NOT IN
+                                    filters_instance.append((selected_column_instance, operator_instance, value_instance))
+                                elif operator_instance not in ['IS NULL', 'IS NOT NULL', 'IN', 'NOT IN'] and (value_instance is not None and value_instance != ''):
+                                    filters_instance.append((selected_column_instance, operator_instance, value_instance))
             
-                            add_filter_instance = st.radio(f"Add another filter after {selected_column_instance} (Comp)?", ['No', 'Yes'], key=f"add_filter_instance_{filter_index_instance}")
+                            add_filter_instance = st.radio(f"Add another filter after {selected_column_instance} (Comp)?", ['No', 'Yes'], key=f"add_filter_comp_{filter_index_instance}")
             
                             if add_filter_instance == 'Yes':
                                 col1, col2 = st.columns([2, 13])
                                 with col1:
-                                    logic_operator_instance = st.selectbox(f"Choose logical operator after filter {filter_index_instance + 1} (Comp)", ['AND', 'OR'], key=f"logic_operator_instance_{filter_index_instance}")
+                                    logic_operator_instance = st.selectbox(f"Choose logical operator after filter {filter_index_instance + 1} (Comp)", ['AND', 'OR'], key=f"logic_operator_comp_{filter_index_instance}")
                                     filter_index_instance += 1
                                 with col2:
                                     st.write("")
@@ -3279,18 +4359,43 @@ with tab2:
                                 break
             
                         # Generate SQL WHERE clause for the second instance
-                        sql_where_clause_instance = " AND "
+                        if filters_instance:
+                            sql_where_clause_instance = " AND "
                         for i, (col_instance, operator_instance, value_instance) in enumerate(filters_instance):
                             if i > 0 and logic_operator_instance:
                                 sql_where_clause_instance += f" {logic_operator_instance} "
             
-                            if operator_instance == 'IN':
-                                # Handle IN operator where the value is a list
-                                sql_where_clause_instance += f"{col_instance} IN {tuple(value_instance)}"
+                            # Handle NULL operators
+                            if operator_instance in ['IS NULL', 'IS NOT NULL']:
+                                sql_where_clause_instance += f"{col_instance} {operator_instance}"
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator_instance in ['IN', 'NOT IN']:
+                                if len(value_instance) == 1:
+                                    # Single value - convert to = or != for better performance
+                                    single_op = '=' if operator_instance == 'IN' else '!='
+                                    if isinstance(value_instance[0], (int, float)):
+                                        sql_where_clause_instance += f"{col_instance} {single_op} {value_instance[0]}"
+                                    else:
+                                        sql_where_clause_instance += f"{col_instance} {single_op} '{value_instance[0]}'"
+                                else:
+                                    # Multiple values - use proper IN/NOT IN with tuple
+                                    # Handle mixed types by converting all to strings for SQL safety
+                                    formatted_values = []
+                                    for v in value_instance:
+                                        if isinstance(v, (int, float)):
+                                            formatted_values.append(str(v))
+                                        else:
+                                            formatted_values.append(f"'{v}'")
+                                    sql_where_clause_instance += f"{col_instance} {operator_instance} ({', '.join(formatted_values)})"
+                            
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator_instance in ['LIKE', 'NOT LIKE']:
+                                sql_where_clause_instance += f"{col_instance} {operator_instance} '{value_instance}'"
+                            
+                            # Handle other operators (=, !=, <, <=, >, >=)
                             else:
-                                # Check if the value is numeric
                                 if isinstance(value_instance, (int, float)):
-                                    # No need for quotes if the value is numeric
                                     sql_where_clause_instance += f"{col_instance} {operator_instance} {value_instance}"
                                 else:
                                     # For non-numeric values (strings, dates), enclose the value in quotes
@@ -3298,33 +4403,36 @@ with tab2:
             
                         # Display the generated SQL WHERE clause
                         #st.write(f"Generated SQL WHERE clause (Comp): {sql_where_clause_instance}")
+                        else:
+                            sql_where_clause_instance = ""
             
             else:
-                st.write("")
+                sql_where_clause_instance = ""
         
     # SQL LOGIC
     # Check pattern an run SQL accordingly
     if mode == 'Complement':
         
         if all([uid, evt, tmstp,fromevt, toevt]):
+            with st.expander("Group Labels", icon=":material/label:"):
                     #Name Reference and Compared Group
-            rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
-            
-            reference_label = 'REFERENCE'
-            compared_label = 'COMPARED'
-            
-            if rename_groups:
-                col1, col2 = st.columns(2)
-                with col1:
-                        reference_label = st.text_input(
-                        "Reference Group Name",
-                        placeholder="Please name the reference group",
-                        )     
-                with col2:
-                         compared_label = st.text_input(
-                         "Compared Group Name",
-                        placeholder="Please name the compared group",
-                        )
+                rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
+                
+                reference_label = 'REFERENCE'
+                compared_label = 'COMPARED'
+                
+                if rename_groups:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                            reference_label = st.text_input(
+                            "Reference Group Name",
+                            placeholder="Please name the reference group",
+                            )     
+                    with col2:
+                             compared_label = st.text_input(
+                             "Compared Group Name",
+                            placeholder="Please name the compared group",
+                            )
     
             # Continue with SQL generation and execution based on inputs...
     
@@ -3335,12 +4443,28 @@ with tab2:
                 crttblrawseventscompsql = None
                 crttblrawseventscomp = None
                 
-                if st.button("Compare", key='complementto'):
-                    # Generate a unique ref table name
-                    def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
+                if st.toggle("Show me!", key='complementto'):
+                    with st.spinner("Analyzing path comparison..."):
+                        # Generate unique table names
+                        def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
+                            unique_refid = uuid.uuid4().hex  # Generate a random UUID
+                            return f"{base_name}_{unique_refid}"
+                        unique_reftable_name = generate_unique_reftable_name()
+                    
+                    def generate_unique_comptable_name(base_namec="RAWEVENTSCOMP"):
+                        unique_compid = uuid.uuid4().hex  # Generate a random UUID
+                        return f"{base_namec}_{unique_compid}"
+                    unique_comptable_name = generate_unique_comptable_name()
+                    
+                    def generate_unique_reftftable_name(base_name="TFIDFREF"):
                         unique_refid = uuid.uuid4().hex  # Generate a random UUID
                         return f"{base_name}_{unique_refid}"
-                    unique_reftable_name = generate_unique_reftable_name()
+                    unique_reftftable_name = generate_unique_reftftable_name()
+                    
+                    def generate_unique_comptftable_name(base_name="TFIDFCOMP"):
+                        unique_refid = uuid.uuid4().hex  # Generate a random UUID
+                        return f"{base_name}_{unique_refid}"
+                    unique_comptftable_name = generate_unique_comptftable_name()
                     
                         # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
@@ -3516,19 +4640,19 @@ with tab2:
                     slope_chart = alt.Chart(restfidf_pivot).mark_line(point=True).encode(
                         x=alt.X('GRP_Labeled:N', title='', sort=[reference_label, compared_label]),
                         y=alt.Y('adjusted_ranking:Q', axis=alt.Axis(grid=False, title='Ranking', labelAngle=0), sort='descending'),
-                        color=alt.Color('EVENT:N', legend=alt.Legend(title="Event", labelFontSize=8, titleFontSize=10)),
+                        color=alt.Color('EVENT:N', legend=None),
                         detail='EVENT:N',
                         tooltip=[
                             alt.Tooltip('RANKING:Q', title="Original Ranking"),
                             alt.Tooltip('EVENT:N', title="Event")
                         ]
-                    ).properties(
-                        width=800,
-                        height=dynamic_height,
-                        title=""
-                    )
-                    
-                    # Add labels for each point
+                     ).properties(
+                         width=800,
+                         height=dynamic_height,
+                         title=""
+                     )
+                     
+                     # Add labels for each point
                     # For the COMPARED group (right-side labels)
                     text_compared = alt.Chart(restfidf_pivot).mark_text(align='left', dx=5, fontSize=10).encode(
                         x=alt.X('GRP_Labeled:N', title='', axis=alt.Axis(labelAngle=0), sort=[reference_label, compared_label]),
@@ -3559,23 +4683,134 @@ with tab2:
                     
            
                     
-                    # Combine chart and text
+                     # Combine chart and text
                     final_chart = slope_chart + text_compared + text_reference 
-                    
-                    # Display in Streamlit
-                    st.altair_chart(final_chart, use_container_width=True)
-                                        
-                    drptblraweventsrefsql =f"""DROP TABLE IF EXISTS {unique_reftable_name}"""
-                    drptblraweventsref = session.sql(drptblraweventsrefsql).collect()
-                    
-                    drptblraweventscompsql =f"""DROP TABLE IF EXISTS {unique_comptable_name}"""
-                    drptblraweventscomp = session.sql(drptblraweventscompsql).collect()
                      
-                    drptblcomptfsql = f"""DROP TABLE IF EXISTS {unique_comptftable_name}"""
-                    drptblcomptf = session.sql(drptblcomptfsql).collect()
-
-                    drptblreftfsql = f"""DROP TABLE IF EXISTS {unique_reftftable_name}"""
-                    drptblreftf = session.sql(drptblreftfsql).collect()
+                     # Add styled title for slope chart
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Event Ranking Comparison</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                     # Display in Streamlit
+                    with st.container(border=True):
+                        st.altair_chart(final_chart, use_container_width=True)
+                    
+                    # Add legend in expander
+                    with st.expander("Event Legend", expanded=False,icon=":material/palette:"):
+                        # Get unique events and their colors from the chart
+                        unique_events = sorted(restfidf_pivot['EVENT'].unique())
+                        legend_columns = st.columns(4)
+                        col_idx = 0
+                        
+                        # Use Altair's default color scheme
+                        altair_colors = [
+                            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+                            '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+                        ]
+                        
+                        for i, event in enumerate(unique_events):
+                            color = altair_colors[i % len(altair_colors)]
+                            with legend_columns[col_idx]:
+                                st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                            col_idx = (col_idx + 1) % 4
+                                        
+                     # Add styled title for sunburst charts
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Path Comparison - Sunburst Charts</h2>
+                         <hr style='margin-top: -8px;margin-bottom:10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                    # Create aggregations for sunburst charts - use same structure as analyze tab
+                    ref_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_reftable_name} GROUP BY path ORDER BY COUNT DESC"
+                    comp_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_comptable_name} GROUP BY path ORDER BY COUNT DESC"
+                    
+                    try:
+                        ref_sunburst_data = session.sql(ref_sunburst_sql).collect()
+                        comp_sunburst_data = session.sql(comp_sunburst_sql).collect()
+                        
+                        ref_sunburst_df = pd.DataFrame(ref_sunburst_data)
+                        comp_sunburst_df = pd.DataFrame(comp_sunburst_data)
+                        
+                        if not ref_sunburst_df.empty and not comp_sunburst_df.empty:
+                            # Columns are already named correctly: PATH, COUNT, UID_LIST
+                            # Convert UID_LIST from string to actual list (same as analyze tab)
+                            import ast
+                            def convert_uid_list(uid_entry):
+                                if isinstance(uid_entry, str):
+                                    try:
+                                        return ast.literal_eval(uid_entry)
+                                    except (SyntaxError, ValueError):
+                                        return []
+                                return uid_entry if isinstance(uid_entry, list) else []
+                            
+                            ref_sunburst_df['UID_LIST'] = ref_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            comp_sunburst_df['UID_LIST'] = comp_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            
+                            # Extract all unique events from both datasets to ensure consistent colors
+                            all_events = set()
+                            for _, row in ref_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            for _, row in comp_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            
+                            # Generate consistent color map for all events
+                            shared_color_map = generate_colors(all_events)
+                            
+                            # Display sunburst charts side by side
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{reference_label}</div>", unsafe_allow_html=True)
+                                 # Add space to prevent tooltip truncation
+                                 st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(ref_sunburst_df, direction="to", color_map=shared_color_map)
+                             
+                            with col2:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{compared_label}</div>", unsafe_allow_html=True)
+                                 # Add space to prevent tooltip truncation
+                                 st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(comp_sunburst_df, direction="to", color_map=shared_color_map)
+                            
+                            # Display shared legend in expander
+                            with st.expander("Event legend", expanded=False, icon=":material/palette:"):
+                                legend_columns = st.columns(4)  
+                                col_idx = 0
+                                for event, color in shared_color_map.items():
+                                    with legend_columns[col_idx]:
+                                        st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                                    
+                                    col_idx = (col_idx + 1) % 4
+                        else:
+                            st.info("No path data available for sunburst visualization", icon=":material/info:")
+                    
+                    except Exception as e:
+                        st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
+                                        
+                    # Robust cleanup of temporary tables
+                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
+                    for table_name in temp_tables:
+                        try:
+                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                        except Exception as e:
+                            st.warning(f"Could not drop table {table_name}: {str(e)}")
+                            pass
                 else:
                         st.write("") 
     
@@ -3586,12 +4821,13 @@ with tab2:
                 crttblrawseventscompsql = None
                 crttblrawseventscomp = None
     
-                if st.button("Compare", key='complementfrom'):
+                if st.toggle("Show me!", key='complementfrom'):
+                    with st.spinner("Analyzing path comparison..."):
                        # Generate a unique ref table name
-                    def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
-                        unique_refid = uuid.uuid4().hex  # Generate a random UUID
-                        return f"{base_name}_{unique_refid}"
-                    unique_reftable_name = generate_unique_reftable_name()
+                        def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
+                            unique_refid = uuid.uuid4().hex  # Generate a random UUID
+                            return f"{base_name}_{unique_refid}"
+                        unique_reftable_name = generate_unique_reftable_name()
                          # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
@@ -3755,16 +4991,16 @@ with tab2:
                     slope_chart = alt.Chart(restfidf_pivot).mark_line(point=True).encode(
                         x=alt.X('GRP_Labeled:N', title='', axis=alt.Axis(labelAngle=0), sort=[reference_label, compared_label]),  # Fixed order
                         y=alt.Y('adjusted_ranking:Q', scale=alt.Scale(reverse=True), axis=alt.Axis(grid=False), title='Ranking'),
-                        color=alt.Color('EVENT:N', legend=alt.Legend(title="Event", labelFontSize=8, titleFontSize=10)),
+                        color=alt.Color('EVENT:N', legend=None),
                         detail='EVENT:N',
                         tooltip=[alt.Tooltip('RANKING:Q', title="Original Ranking")]  # Tooltip for non-adjusted ranking
-                    ).properties(
-                        width=800,
-                        height=dynamic_height,
-                        title=""
-                    )
-                    
-                    # Add labels for each point
+                     ).properties(
+                         width=800,
+                         height=dynamic_height,
+                         title=""
+                     )
+                     
+                     # Add labels for each point
                     # For the "COMPARED" group, we place labels on the right
                     text_compared = alt.Chart(restfidf_pivot).mark_text(align='left', dx=5, fontSize=10).encode(
                         x=alt.X('GRP_Labeled:N', sort=[reference_label, compared_label]),  # Fixed order
@@ -3785,33 +5021,144 @@ with tab2:
                         alt.datum.GRP_Labeled == reference_label
                     )
                     
-                    # Combine chart and text
-                    final_chart = slope_chart + text_compared + text_reference
-                    
-                    # Display in Streamlit
-                    st.altair_chart(final_chart, use_container_width=True)
-                                        
-                    drptblraweventsrefsql =f"""DROP TABLE IF EXISTS {unique_reftable_name}"""
-                    drptblraweventsref = session.sql(drptblraweventsrefsql).collect()
-                    
-                    drptblraweventscompsql =f"""DROP TABLE IF EXISTS {unique_comptable_name}"""
-                    drptblraweventscomp = session.sql(drptblraweventscompsql).collect()
+                     # Combine chart and text
+                    final_chart = slope_chart + text_compared + text_reference 
                      
-                    drptblcomptfsql = f"""DROP TABLE IF EXISTS {unique_comptftable_name}"""
-                    drptblcomptf = session.sql(drptblcomptfsql).collect()
-
-                    drptblreftfsql = f"""DROP TABLE IF EXISTS {unique_reftftable_name}"""
-                    drptblreftf = session.sql(drptblreftfsql).collect()
+                     # Add styled title for slope chart
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Event Ranking Comparison</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                     # Display in Streamlit
+                    with st.container(border=True):
+                        st.altair_chart(final_chart, use_container_width=True)
+                    
+                    # Add legend in expander
+                    with st.expander("Event Legend", expanded=False,icon=":material/palette:"):
+                        # Get unique events and their colors from the chart
+                        unique_events = sorted(restfidf_pivot['EVENT'].unique())
+                        legend_columns = st.columns(4)
+                        col_idx = 0
+                        
+                        # Use Altair's default color scheme
+                        altair_colors = [
+                            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+                            '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+                        ]
+                        
+                        for i, event in enumerate(unique_events):
+                            color = altair_colors[i % len(altair_colors)]
+                            with legend_columns[col_idx]:
+                                st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                            col_idx = (col_idx + 1) % 4
+                                        
+                     # Add styled title for sunburst charts
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Path Comparison - Sunburst Charts</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                    # Create aggregations for sunburst charts - use same structure as analyze tab
+                    ref_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_reftable_name} GROUP BY path ORDER BY COUNT DESC"
+                    comp_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_comptable_name} GROUP BY path ORDER BY COUNT DESC"
+                    
+                    try:
+                        ref_sunburst_data = session.sql(ref_sunburst_sql).collect()
+                        comp_sunburst_data = session.sql(comp_sunburst_sql).collect()
+                        
+                        ref_sunburst_df = pd.DataFrame(ref_sunburst_data)
+                        comp_sunburst_df = pd.DataFrame(comp_sunburst_data)
+                        
+                        if not ref_sunburst_df.empty and not comp_sunburst_df.empty:
+                            # Columns are already named correctly: PATH, COUNT, UID_LIST
+                            # Convert UID_LIST from string to actual list (same as analyze tab)
+                            import ast
+                            def convert_uid_list(uid_entry):
+                                if isinstance(uid_entry, str):
+                                    try:
+                                        return ast.literal_eval(uid_entry)
+                                    except (SyntaxError, ValueError):
+                                        return []
+                                return uid_entry if isinstance(uid_entry, list) else []
+                            
+                            ref_sunburst_df['UID_LIST'] = ref_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            comp_sunburst_df['UID_LIST'] = comp_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            
+                            # Extract all unique events from both datasets to ensure consistent colors
+                            all_events = set()
+                            for _, row in ref_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            for _, row in comp_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            
+                            # Generate consistent color map for all events
+                            shared_color_map = generate_colors(all_events)
+                            
+                            # Display sunburst charts side by side
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{reference_label}</div>", unsafe_allow_html=True)
+                                 # Add space to prevent tooltip truncation
+                                 st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(ref_sunburst_df, direction="to", color_map=shared_color_map)
+                             
+                            with col2:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{compared_label}</div>", unsafe_allow_html=True)
+                                 # Add space to prevent tooltip truncation
+                                 st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(comp_sunburst_df, direction="to", color_map=shared_color_map)
+                            
+                            # Display shared legend in expander
+                            with st.expander("Event legend", expanded=False, icon=":material/palette:"):
+                                legend_columns = st.columns(4)  
+                                col_idx = 0
+                                for event, color in shared_color_map.items():
+                                    with legend_columns[col_idx]:
+                                        st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                                    
+                                    col_idx = (col_idx + 1) % 4
+                        else:
+                            st.info("No path data available for sunburst visualization", icon=":material/info:")
+                    
+                    except Exception as e:
+                        st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
+                                        
+                    # Robust cleanup of temporary tables
+                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
+                    for table_name in temp_tables:
+                        try:
+                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                        except Exception as e:
+                            st.warning(f"Could not drop table {table_name}: {str(e)}")
+                            pass
         
                 else:
                     st.write("")
                     
             # Separate block for PATH BETWEEN 
             elif fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any':
-                st.warning("Not a valid pattern for comparison")
+                st.warning("Not a valid pattern for comparison",icon=":material/warning:")
     
             elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
-                st.warning("This is tuple generator - Not a valid pattern for comparison")
+                st.warning("This is tuple generator - Not a valid pattern for comparison",icon=":material/warning:")
                 
             else:
                 st.write("Please select appropriate options for 'from' and 'to'")
@@ -3821,7 +5168,7 @@ with tab2:
             .custom-container-1 {
                 padding: 10px 10px 10px 10px;
                 border-radius: 10px;
-                background-color: #f0f2f6;  /* Light blue background f0f8ff */
+                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
                 border: none;  /* Blue border */
                 margin-bottom: 20px;
             }
@@ -3830,7 +5177,7 @@ with tab2:
         
             st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #29B5E8; margin-top: 0px; margin-bottom: -15px;">
+                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
                     Please ensure all required inputs are selected before running the app. Valid patterns for comparison are 'path to' (FROM= Any) and 'path from' (TO = Any)
                 </h5>
             </div>
@@ -3839,37 +5186,39 @@ with tab2:
    
     elif mode == 'Union':
         if all([uid, evt, tmstp,fromevt, toevt,uid1, evt1, tmstp1,fromevt1, toevt1]):
+            with st.expander("Group Labels", icon=":material/label:"):
                     #Name Reference and Compared Group
-            rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
-            
-            reference_label = 'REFERENCE'
-            compared_label = 'COMPARED'
-            
-            if rename_groups:
-                col1, col2 = st.columns(2)
-                with col1:
-                        reference_label = st.text_input(
-                        "Reference Group Name",
-                        placeholder="Please name the reference group",
-                        )     
-                with col2:
-                         compared_label = st.text_input(
-                         "Compared Group Name",
-                        placeholder="Please name the compared group",
-                        )
+                rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
+                
+                reference_label = 'REFERENCE'
+                compared_label = 'COMPARED'
+                
+                if rename_groups:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                            reference_label = st.text_input(
+                            "Reference Group Name",
+                            placeholder="Please name the reference group",
+                            )     
+                    with col2:
+                             compared_label = st.text_input(
+                             "Compared Group Name",
+                            placeholder="Please name the compared group",
+                            )
             # PATH TO: Pattern = A{{{minnbbevt},{maxnbbevt}}} B
-            if fromevt.strip("'") == 'Any' and toevt.strip("'") != 'Any' and fromevt1.strip("'") == 'Any' and toevt1.strip("'") != 'Any':
+            if fromevt.strip("'") == 'Any' and toevt.strip("'") != 'Any' and fromevt1.strip("'") == 'Any' and toevt1.strip("'") != 'Any':     
                 crttblrawseventsrefsql= None
                 crttblrawseventsref = None
                 crttblrawseventscompsql = None
                 crttblrawseventscomp = None
                 
-                if st.button("Compare", key='unionto'):
-                    # Generate a unique ref table name
-                    def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
+                if st.toggle("Show me!", key='unionto'):
+                    with st.spinner("Analyzing path comparison..."):
+                            # Generate a unique ref table name
+                     def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
                         unique_refid = uuid.uuid4().hex  # Generate a random UUID
                         return f"{base_name}_{unique_refid}"
-                    unique_reftable_name = generate_unique_reftable_name()
+                     unique_reftable_name = generate_unique_reftable_name()
                     
                         # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
@@ -3973,7 +5322,7 @@ with tab2:
                     
                     #st.write(crttbltfidfrefsql)
                     crttbltfidfref = session.sql(crttbltfidfrefsql).collect()
-                # Generate a unique comp tfidf table name
+                 # Generate a unique comp tfidf table name
                     def generate_unique_comptftable_name(base_name="TFIDFCOMP"):
                         unique_refid = uuid.uuid4().hex  # Generate a random UUID
                         return f"{base_name}_{unique_refid}"
@@ -4048,19 +5397,19 @@ with tab2:
                     slope_chart = alt.Chart(restfidf_pivot).mark_line(point=True).encode(
                         x=alt.X('GRP_Labeled:N', title='', sort=[reference_label, compared_label]),
                         y=alt.Y('adjusted_ranking:Q', axis=alt.Axis(grid=False, title='Ranking', labelAngle=0), sort='descending'),
-                        color=alt.Color('EVENT:N', legend=alt.Legend(title="Event", labelFontSize=8, titleFontSize=10)),
+                        color=alt.Color('EVENT:N', legend=None),
                         detail='EVENT:N',
                         tooltip=[
                             alt.Tooltip('RANKING:Q', title="Original Ranking"),
                             alt.Tooltip('EVENT:N', title="Event")
                         ]
-                    ).properties(
-                        width=800,
-                        height=dynamic_height,
-                        title=""
-                    )
-                    
-                    # Add labels for each point
+                     ).properties(
+                         width=800,
+                         height=dynamic_height,
+                         title=""
+                     )
+                     
+                     # Add labels for each point
                     # For the COMPARED group (right-side labels)
                     text_compared = alt.Chart(restfidf_pivot).mark_text(align='left', dx=5, fontSize=10).encode(
                         x=alt.X('GRP_Labeled:N', title='', axis=alt.Axis(labelAngle=0), sort=[reference_label, compared_label]),
@@ -4091,23 +5440,130 @@ with tab2:
                     
            
                     
-                    # Combine chart and text
+                     # Combine chart and text
                     final_chart = slope_chart + text_compared + text_reference 
-                    
-                    # Display in Streamlit
-                    st.altair_chart(final_chart, use_container_width=True)
-                                        
-                    drptblraweventsrefsql =f"""DROP TABLE IF EXISTS {unique_reftable_name}"""
-                    drptblraweventsref = session.sql(drptblraweventsrefsql).collect()
-                    
-                    drptblraweventscompsql =f"""DROP TABLE IF EXISTS {unique_comptable_name}"""
-                    drptblraweventscomp = session.sql(drptblraweventscompsql).collect()
                      
-                    drptblcomptfsql = f"""DROP TABLE IF EXISTS {unique_comptftable_name}"""
-                    drptblcomptf = session.sql(drptblcomptfsql).collect()
-
-                    drptblreftfsql = f"""DROP TABLE IF EXISTS {unique_reftftable_name}"""
-                    drptblreftf = session.sql(drptblreftfsql).collect()
+                     # Add styled title for slope chart
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Event Ranking Comparison</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                     # Display in Streamlit
+                    with st.container(border=True):
+                        st.altair_chart(final_chart, use_container_width=True)
+                    
+                    # Add legend in expander
+                    with st.expander("Event Legend", expanded=False,icon=":material/palette:"):
+                        # Get unique events and their colors from the chart
+                        unique_events = sorted(restfidf_pivot['EVENT'].unique())
+                        legend_columns = st.columns(4)
+                        col_idx = 0
+                        
+                        # Use Altair's default color scheme
+                        altair_colors = [
+                            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+                            '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+                        ]
+                        
+                        for i, event in enumerate(unique_events):
+                            color = altair_colors[i % len(altair_colors)]
+                            with legend_columns[col_idx]:
+                                st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                            col_idx = (col_idx + 1) % 4
+                                        
+                     # Add styled title for sunburst charts
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Path Comparison - Sunburst Charts</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    
+                    # Create aggregations for sunburst charts - use same structure as analyze tab
+                    ref_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_reftable_name} GROUP BY path ORDER BY COUNT DESC"
+                    comp_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_comptable_name} GROUP BY path ORDER BY COUNT DESC"
+                    
+                    try:
+                        ref_sunburst_data = session.sql(ref_sunburst_sql).collect()
+                        comp_sunburst_data = session.sql(comp_sunburst_sql).collect()
+                        
+                        ref_sunburst_df = pd.DataFrame(ref_sunburst_data)
+                        comp_sunburst_df = pd.DataFrame(comp_sunburst_data)
+                        
+                        if not ref_sunburst_df.empty and not comp_sunburst_df.empty:
+                            # Columns are already named correctly: PATH, COUNT, UID_LIST
+                            # Convert UID_LIST from string to actual list (same as analyze tab)
+                            import ast
+                            def convert_uid_list(uid_entry):
+                                if isinstance(uid_entry, str):
+                                    try:
+                                        return ast.literal_eval(uid_entry)
+                                    except (SyntaxError, ValueError):
+                                        return []
+                                return uid_entry if isinstance(uid_entry, list) else []
+                            
+                            ref_sunburst_df['UID_LIST'] = ref_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            comp_sunburst_df['UID_LIST'] = comp_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            
+                            # Extract all unique events from both datasets to ensure consistent colors
+                            all_events = set()
+                            for _, row in ref_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            for _, row in comp_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            
+                            # Generate consistent color map for all events
+                            shared_color_map = generate_colors(all_events)
+                            
+                            # Display sunburst charts side by side
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{reference_label}</div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(ref_sunburst_df, direction="from", color_map=shared_color_map)
+                            
+                            with col2:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{compared_label}</div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(comp_sunburst_df, direction="from", color_map=shared_color_map)
+                            
+                            # Display shared legend in expander
+                            with st.expander("Event legend", expanded=False, icon=":material/palette:"):
+                                legend_columns = st.columns(4)  
+                                col_idx = 0
+                                for event, color in shared_color_map.items():
+                                    with legend_columns[col_idx]:
+                                        st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                                    
+                                    col_idx = (col_idx + 1) % 4
+                        else:
+                            st.info("No path data available for sunburst visualization", icon=":material/info:")
+                    
+                    except Exception as e:
+                        st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
+                                        
+                    # Robust cleanup of temporary tables
+                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
+                    for table_name in temp_tables:
+                        try:
+                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                        except Exception as e:
+                            st.warning(f"Could not drop table {table_name}: {str(e)}")
+                            pass
                 else:
                         st.write("") 
     
@@ -4118,12 +5574,13 @@ with tab2:
                 crttblrawseventscompsql = None
                 crttblrawseventscomp = None
                 
-                if st.button("Compare", key='unionfrom'):
+                if st.toggle("Show me!", key='unionfrom'):
+                    with st.spinner("Analyzing path comparison..."):
                        # Generate a unique ref table name
-                    def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
-                        unique_refid = uuid.uuid4().hex  # Generate a random UUID
-                        return f"{base_name}_{unique_refid}"
-                    unique_reftable_name = generate_unique_reftable_name()
+                        def generate_unique_reftable_name(base_name="RAWEVENTSREF"):
+                            unique_refid = uuid.uuid4().hex  # Generate a random UUID
+                            return f"{base_name}_{unique_refid}"
+                        unique_reftable_name = generate_unique_reftable_name()
                          # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
@@ -4227,7 +5684,7 @@ with tab2:
                     
                     #st.write(crttbltfidfrefsql)
                     crttbltfidfref = session.sql(crttbltfidfrefsql).collect()
-                # Generate a unique comp tfidf table name
+                 # Generate a unique comp tfidf table name
                     def generate_unique_comptftable_name(base_name="TFIDFCOMP"):
                         unique_refid = uuid.uuid4().hex  # Generate a random UUID
                         return f"{base_name}_{unique_refid}"
@@ -4268,9 +5725,9 @@ with tab2:
                     # Replace "COMPARED" and "REFERENCE" with the dynamic labels
                     restfidf['GRP_Labeled'] = restfidf['GRP'].replace({"COMPARED": compared_label, "REFERENCE": reference_label})
                    
-                # Reshape the data for plotting
+                 # Reshape the data for plotting
                     restfidf_pivot = restfidf.pivot(index="EVENT", columns="GRP_Labeled", values="RANKING").reset_index().melt(id_vars="EVENT", value_name="RANKING",var_name="GRP_Labeled")
-                # Calculate dynamic height based on the range of rankings
+                 # Calculate dynamic height based on the range of rankings
                     ranking_range = restfidf_pivot["RANKING"].nunique()  # Number of unique ranking levels
                     base_height_per_rank = 33  # Adjust this value as needed
                     dynamic_height = ranking_range * base_height_per_rank
@@ -4282,16 +5739,16 @@ with tab2:
                     slope_chart = alt.Chart(restfidf_pivot).mark_line(point=True).encode(
                         x=alt.X('GRP_Labeled:N', title='', axis=alt.Axis(labelAngle=0), sort=[reference_label, compared_label]),  # Fixed order
                         y=alt.Y('adjusted_ranking:Q', scale=alt.Scale(reverse=True), axis=alt.Axis(grid=False), title='Ranking'),
-                        color=alt.Color('EVENT:N', legend=alt.Legend(title="Event", labelFontSize=8, titleFontSize=10)),
+                        color=alt.Color('EVENT:N', legend=None),
                         detail='EVENT:N',
                         tooltip=[alt.Tooltip('RANKING:Q', title="Original Ranking")]  # Tooltip for non-adjusted ranking
-                    ).properties(
-                        width=800,
-                        height=dynamic_height,
-                        title=""
-                    )
-                    
-                    # Add labels for each point
+                     ).properties(
+                         width=800,
+                         height=dynamic_height,
+                         title=""
+                     )
+                     
+                     # Add labels for each point
                     # For the "COMPARED" group, we place labels on the right
                     text_compared = alt.Chart(restfidf_pivot).mark_text(align='left', dx=5, fontSize=10).encode(
                         x=alt.X('GRP_Labeled:N', sort=[reference_label, compared_label]),  # Fixed order
@@ -4312,33 +5769,140 @@ with tab2:
                         alt.datum.GRP_Labeled == reference_label
                     )
                     
-                    # Combine chart and text
-                    final_chart = slope_chart + text_compared + text_reference
-                    
-                    # Display in Streamlit
-                    st.altair_chart(final_chart, use_container_width=True)
-                                        
-                    drptblraweventsrefsql =f"""DROP TABLE IF EXISTS {unique_reftable_name}"""
-                    drptblraweventsref = session.sql(drptblraweventsrefsql).collect()
-                    
-                    drptblraweventscompsql =f"""DROP TABLE IF EXISTS {unique_comptable_name}"""
-                    drptblraweventscomp = session.sql(drptblraweventscompsql).collect()
+                     # Combine chart and text
+                    final_chart = slope_chart + text_compared + text_reference 
                      
-                    drptblcomptfsql = f"""DROP TABLE IF EXISTS {unique_comptftable_name}"""
-                    drptblcomptf = session.sql(drptblcomptfsql).collect()
-
-                    drptblreftfsql = f"""DROP TABLE IF EXISTS {unique_reftftable_name}"""
-                    drptblreftf = session.sql(drptblreftfsql).collect()
+                     # Add styled title for slope chart
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Event Ranking Comparison</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    st.write("")
+                     # Display in Streamlit
+                    with st.container(border=True):
+                        st.altair_chart(final_chart, use_container_width=True)
+                    
+                    # Add legend in expander
+                    with st.expander("Event Legend", expanded=False,icon=":material/palette:"):
+                        # Get unique events and their colors from the chart
+                        unique_events = sorted(restfidf_pivot['EVENT'].unique())
+                        legend_columns = st.columns(4)
+                        col_idx = 0
+                        
+                        # Use Altair's default color scheme
+                        altair_colors = [
+                            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+                            '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
+                            '#c49c94', '#f7b6d3', '#c7c7c7', '#dbdb8d', '#9edae5'
+                        ]
+                        
+                        for i, event in enumerate(unique_events):
+                            color = altair_colors[i % len(altair_colors)]
+                            with legend_columns[col_idx]:
+                                st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                            col_idx = (col_idx + 1) % 4
+                                        
+                     # Add styled title for sunburst charts
+                    st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Path Comparison - Sunburst Charts</h2>
+                         <hr style='margin-top: -8px;margin-bottom: 10px;height: 3px; border: 0; background-color: #d1d5db;'>
+                         """, unsafe_allow_html=True)
+                    
+                    # Create aggregations for sunburst charts - use same structure as analyze tab
+                    ref_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_reftable_name} GROUP BY path ORDER BY COUNT DESC"
+                    comp_sunburst_sql = f"SELECT path as PATH, COUNT(*) as COUNT, ARRAY_AGG({uid}) as UID_LIST FROM {unique_comptable_name} GROUP BY path ORDER BY COUNT DESC"
+                    
+                    try:
+                        ref_sunburst_data = session.sql(ref_sunburst_sql).collect()
+                        comp_sunburst_data = session.sql(comp_sunburst_sql).collect()
+                        
+                        ref_sunburst_df = pd.DataFrame(ref_sunburst_data)
+                        comp_sunburst_df = pd.DataFrame(comp_sunburst_data)
+                        
+                        if not ref_sunburst_df.empty and not comp_sunburst_df.empty:
+                            # Columns are already named correctly: PATH, COUNT, UID_LIST
+                            # Convert UID_LIST from string to actual list (same as analyze tab)
+                            import ast
+                            def convert_uid_list(uid_entry):
+                                if isinstance(uid_entry, str):
+                                    try:
+                                        return ast.literal_eval(uid_entry)
+                                    except (SyntaxError, ValueError):
+                                        return []
+                                return uid_entry if isinstance(uid_entry, list) else []
+                            
+                            ref_sunburst_df['UID_LIST'] = ref_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            comp_sunburst_df['UID_LIST'] = comp_sunburst_df['UID_LIST'].apply(convert_uid_list)
+                            
+                            # Extract all unique events from both datasets to ensure consistent colors
+                            all_events = set()
+                            for _, row in ref_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            for _, row in comp_sunburst_df.iterrows():
+                                path_str = row['PATH']
+                                # Handle both comma-space and comma-only separators
+                                if ", " in path_str:
+                                    path_events = path_str.split(", ")
+                                else:
+                                    path_events = path_str.split(",")
+                                path_events = [event.strip() for event in path_events]
+                                all_events.update(path_events)
+                            
+                            # Generate consistent color map for all events
+                            shared_color_map = generate_colors(all_events)
+                            
+                            # Display sunburst charts side by side
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{reference_label}</div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(ref_sunburst_df, direction="from", color_map=shared_color_map)
+                            
+                            with col2:
+                                with st.container(border=True):
+                                 st.markdown(f"<div style='text-align: center; font-size: 14px; font-weight: normal;'>{compared_label}</div>", unsafe_allow_html=True)
+                                 process_and_generate_sunburst_with_colors(comp_sunburst_df, direction="from", color_map=shared_color_map)
+                            
+                            # Display shared legend in expander
+                            with st.expander("Event legend", expanded=False,icon=":material/palette:"):
+                                legend_columns = st.columns(4)  
+                                col_idx = 0
+                                for event, color in shared_color_map.items():
+                                    with legend_columns[col_idx]:
+                                        st.markdown(f"<span style='color:{color};font-weight:bold;font-size:14px'>●</span> {event}", unsafe_allow_html=True)
+                                    
+                                    col_idx = (col_idx + 1) % 4
+                        else:
+                            st.info("No path data available for sunburst visualization", icon=":material/info:")
+                    
+                    except Exception as e:
+                        st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
+                                        
+                    # Robust cleanup of temporary tables
+                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
+                    for table_name in temp_tables:
+                        try:
+                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                        except Exception as e:
+                            st.warning(f"Could not drop table {table_name}: {str(e)}")
+                            pass
         
                 else:
                     st.write("")
                     
             # Separate block for PATH BETWEEN 
             elif fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any' and fromevt1.strip("'") != 'Any' and toevt1.strip("'") != 'Any':
-                st.warning("Not a valid pattern for comparison")
+                st.warning("Not a valid pattern for comparison",icon=":material/warning:")
     
             elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any' and fromevt1.strip("'") == 'Any' and toevt1.strip("'") == 'Any':
-                st.warning("This is tuple generator - Not a valid pattern for comparison")
+                st.warning("This is tuple generator - Not a valid pattern for comparison",icon=":material/warning:")
                 
             else:
                 st.write("Please select appropriate options for 'from' and 'to'")
@@ -4348,7 +5912,7 @@ with tab2:
             .custom-container-1 {
                 padding: 10px 10px 10px 10px;
                 border-radius: 10px;
-                background-color: #f0f2f6;  /* Light blue background f0f8ff */
+                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
                 border: none;  /* Blue border */
                 margin-bottom: 20px;
             }
@@ -4357,7 +5921,7 @@ with tab2:
         
             st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #29B5E8; margin-top: 0px; margin-bottom: -15px;">
+                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
                     Please ensure all required inputs are selected before running the app. Valid patterns for comparison are 'path to' (FROM= Any) and 'path from' (TO = Any)
                 </h5>
             </div>
