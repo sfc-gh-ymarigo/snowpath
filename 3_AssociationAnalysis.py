@@ -396,7 +396,7 @@ def display_ai_insights_section(key_prefix, help_text="Select the LLM model for 
 def rgba_to_str(rgba):
     return f"rgba({int(rgba[0] * 255)}, {int(rgba[1] * 255)}, {int(rgba[2] * 255)}, {rgba[3]})"
         
-def sigma_graph(df, metric):
+def sigma_graph(df, metric, height=900):
     # Step 1: Extract event pairs and calculate weights
     event_pairs = []
     event_counts = Counter()
@@ -523,7 +523,7 @@ def sigma_graph(df, metric):
     }
 
     # Step 5: Render the ECharts graph in Streamlit
-    st_echarts(options=options, height="800px")
+    st_echarts(options=options, height=f"{height}px")
     
 
     
@@ -1216,7 +1216,9 @@ FROM ASSOCIATION_RULES{show_only_where};
                 filter_percentage = st.slider("Display Top %", 1, 100, 100, 
                                              help=f"Show top X% of associations based on {metric if 'metric' in locals() else 'selected metric'}")
             with col3:
-                st.write("")
+                # Add chart height control
+                chart_height = st.number_input("Chart Height (px)", min_value=400, max_value=2000, value=900, step=50,
+                                              help="Adjust the height of the network graph")
             with col4:
                 st.write("")
             with col5:
@@ -1238,7 +1240,7 @@ FROM ASSOCIATION_RULES{show_only_where};
                     filtered_dfasso = dfasso
                 
                 # Visualize the graph with filtered data
-                sigma_graph(filtered_dfasso, metric)
+                sigma_graph(filtered_dfasso, metric, chart_height)
     
     # AI-Powered Insights with model selection (only show if toggle is on)
     if show_details:
