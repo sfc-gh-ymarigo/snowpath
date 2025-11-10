@@ -171,52 +171,21 @@ div[data-testid="stInfo"]::before {
     content: "" !important;
 }
 
-/* Override Streamlit's default alert styling more aggressively */
-div[data-testid="stAlert"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-}
-
-div[data-testid="stAlert"] > div {
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-/* Target all text content inside alerts */
-.stAlert p,
-.stAlert div,
-.stAlert span,
-div[data-testid="stAlert"] p,
-div[data-testid="stAlert"] div,
-div[data-testid="stAlert"] span {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* More specific targeting for alert types */
-div[data-testid="stSuccess"],
-div[data-testid="stInfo"],
-div[data-testid="stWarning"],
-div[data-testid="stError"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-    border-radius: 10px !important;
-}
 
 @media (prefers-color-scheme: dark) {
     .custom-container-1 {
         background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
+        border: 1px solid #4a4a4a !important;
+    }
+    
+    .custom-container-1 h5 {
+        color: #ffffff !important;
     }
     
     /* Custom styling for all message types in dark mode */
     .stAlert[data-baseweb="notification"] {
         background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
+        border: 1px solid #4a4a4a !important;
         --baseRadius: 10px !important;
         baseRadius: 10px !important;
         border-radius: 10px !important;
@@ -428,20 +397,16 @@ def sigma_graph(df, metric, height=900):
             "label": {
                 "show": True,
                 "position": "right",
-                "color": "#333333",  # Dark gray - visible in light mode
+                "color": "#888888",  # Light gray - works in both light and dark mode
                 "fontWeight": "normal",
-                "textBorderColor": "rgba(255, 255, 255, 0.8)",  # Semi-transparent white outline for dark mode
-                "textBorderWidth": 2,
             },
             "emphasis": {
                 "itemStyle": {
                     "color": f"hsl({i * 360 / len(unique_events)}, 70%, 50%, 0.7)"  # Maintain same color on hover
                 },
                 "label": {
-                    "color": "#000000",  # Black label on hover - works in both modes
+                    "color": "#ffffff",  # White label on hover
                     "fontWeight": "bold",
-                    "textBorderColor": "rgba(255, 255, 255, 0.9)",
-                    "textBorderWidth": 2,
                 }
             },
             "tooltip": {
@@ -493,9 +458,7 @@ def sigma_graph(df, metric, height=900):
                 "label": {
                     "show": True, 
                     "fontSize": 12,
-                    "color": "#333333",  # Dark gray - visible in light mode
-                    "textBorderColor": "rgba(255, 255, 255, 0.8)",
-                    "textBorderWidth": 2,
+                    "color": "#888888",  # Light gray - works in both light and dark mode
                 },
                 "edgeSymbol": ["circle", "arrow"],
                 "edgeSymbolSize": [4, 10],
@@ -512,10 +475,8 @@ def sigma_graph(df, metric, height=900):
                 "emphasis": {
                     "focus": "adjacency",
                     "label": {
-                        "color": "#000000",  # Black - works in both modes
+                        "color": "#ffffff",  # White label on hover
                         "fontWeight": "bold",
-                        "textBorderColor": "rgba(255, 255, 255, 0.9)",
-                        "textBorderWidth": 2,
                     }
                 },
             }
@@ -529,27 +490,10 @@ def sigma_graph(df, metric, height=900):
     
 st.sidebar.markdown("")
 #Page Title
-st.markdown("""
-<style>
-.custom-container-1 {
-    background-color: #f0f2f6 !important;
-    padding: 10px;
-    border-radius: 5px;
-    margin-bottom: 10px;
-}
-
-@media (prefers-color-scheme: dark) {
-    .custom-container-1 {
-        background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
 
 st.markdown("""
 <div class="custom-container-1">
-    <h5 style="font-size: 18px; font-weight: normal; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+    <h5 style="font-size: 18px; font-weight: normal; margin-top: 0px; margin-bottom: -15px;">
         ASSOCIATION ANALYSIS
     </h5>
 </div>
@@ -567,7 +511,7 @@ sess = None
 excl3 = "''"
 cols=''
 colsdf=pd.DataFrame()
-with st.expander("Input parameters"):
+with st.expander("Input parameters", icon=":material/settings:"):
         
         # DATA SOURCE 
         st.markdown("""
@@ -1093,154 +1037,157 @@ FROM ASSOCIATION_RULES{show_only_where};
         
         # Display the selected visualization
         if genre == 'Detailed Table':
-            with st.spinner("Loading detailed table..."):
-                st.dataframe(filtered_df, use_container_width=True)
+            with st.container(border=True):
+                with st.spinner("Loading detailed table..."):
+                    st.dataframe(filtered_df, use_container_width=True)
         elif genre == 'Heatmap':
-            # Allow the user to select the metric to display in the heatmap
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                metric = st.selectbox('Choose a metric', dfasso.columns[5:])
-                st.write("")
-            
-            with st.spinner("Generating heatmap visualization..."):
-    
-                dfasso[metric] = pd.to_numeric(dfasso[metric], errors='coerce')
-                # Create a heatmap
-                heatmap_data = dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric)
-                n_rows = heatmap_data.shape[0]  # Number of unique ANTECEDENT values (rows)
-                n_cols = heatmap_data.shape[1]  # Number of unique CONSEQUENT values (columns)
-                font_size = max(5, 20 - max(n_rows, n_cols))
-                plt.figure(figsize=(14, 8))
-                sns.heatmap(heatmap_data, cmap="Blues", annot=True, fmt=".2f", annot_kws={"fontsize": font_size}, cbar=False)
-    
-                # Set the title and labels
-                plt.xlabel("CONSEQUENT", fontsize=12)
-                plt.ylabel("ANTECEDENT", fontsize=12)
-    
-                # Show the plot
-                #st.pyplot(plt)
-            
-                # Create pivot table for heatmap data
-                # Step 1: Create heatmap data and round values to 2 decimal places
-                all_labels = sorted(set(dfasso['ANTECEDENT']).union(set(dfasso['CONSEQUENT'])))
-                heatmap_data = (dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric).reindex(index=all_labels, columns=all_labels).round(2))
-                #heatmap_data = dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric).fillna(0).round(2)
-                #st.write(heatmap_data)
-                #st.write("Unique ANTECEDENTs:", dfasso['ANTECEDENT'].nunique())
-                #st.write("Unique CONSEQUENTs:", dfasso['CONSEQUENT'].nunique())
-                #st.write("Missing CONSEQUENTs in rows:", set(dfasso['CONSEQUENT'].unique()) - set(dfasso['ANTECEDENT'].unique()))
-                # Step 2: Remove diagonal values by setting them to None
-                 # Step 2: Remove diagonal values by setting them to None
-                for idx in heatmap_data.index:
-                    if idx in heatmap_data.columns:
-                        heatmap_data.at[idx, idx] = None
-                # Step 3: Convert to ECharts-compatible list format (skip None values)
-                #heatmap_list = [
-                #    [i, j, float(heatmap_data.iloc[i, j])]  # Use float to avoid JSON errors
-                #    for i in range(heatmap_data.shape[0])
-                #    for j in range(heatmap_data.shape[1])
-                #    if pd.notna(heatmap_data.iloc[i, j])
-                #]
-                heatmap_list = [
-                    [i, j, float(heatmap_data.iloc[i, j])]
-                    for i in range(len(all_labels))
-                    for j in range(len(all_labels))
-                    if pd.notna(heatmap_data.iloc[i, j])]
-                # Step 4: Define options for ECharts heatmap
-                options = {
-                    "tooltip": {"trigger": "item"},
-                    "grid": {
-                        "height": "80%",
-                        "top": "10%",
-                        "left": "10%",
-                        "right": "10%",
-                        "containLabel": True
-                    },
-                    "xAxis": {
-                        "type": "category",
-                        #"data": heatmap_data.columns.tolist(),
-                        "data": all_labels,
-                        "splitArea": {"show": True},
-                        "axisLabel": {
-                            "interval": 0,
-                            "rotate": 45
-                        }
-                    },
-                    "yAxis": {
-                        "type": "category",
-                        "data": all_labels,
-                        #"data": heatmap_data.index.tolist(),
-                        "splitArea": {"show": True}
-                    },
-                    "visualMap": {
-                        "min": heatmap_data.min().min(skipna=True),
-                        "max": heatmap_data.max().max(skipna=True),
-                        "calculable": True,
-                        "orient": "horizontal",
-                        "left": "center",
-                        "top": "0%",
-                        "inRange": {
-                            "color": ["#ffffff", "#e0f3f8", "#abd9e9", "#74add1", "#4575b4"]
+            with st.container(border=True):
+                # Allow the user to select the metric to display in the heatmap
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    metric = st.selectbox('Choose a metric', dfasso.columns[5:])
+                    st.write("")
+                
+                with st.spinner("Generating heatmap visualization..."):
+        
+                    dfasso[metric] = pd.to_numeric(dfasso[metric], errors='coerce')
+                    # Create a heatmap
+                    heatmap_data = dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric)
+                    n_rows = heatmap_data.shape[0]  # Number of unique ANTECEDENT values (rows)
+                    n_cols = heatmap_data.shape[1]  # Number of unique CONSEQUENT values (columns)
+                    font_size = max(5, 20 - max(n_rows, n_cols))
+                    plt.figure(figsize=(14, 8))
+                    sns.heatmap(heatmap_data, cmap="Blues", annot=True, fmt=".2f", annot_kws={"fontsize": font_size}, cbar=False)
+        
+                    # Set the title and labels
+                    plt.xlabel("CONSEQUENT", fontsize=12)
+                    plt.ylabel("ANTECEDENT", fontsize=12)
+        
+                    # Show the plot
+                    #st.pyplot(plt)
+                
+                    # Create pivot table for heatmap data
+                    # Step 1: Create heatmap data and round values to 2 decimal places
+                    all_labels = sorted(set(dfasso['ANTECEDENT']).union(set(dfasso['CONSEQUENT'])))
+                    heatmap_data = (dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric).reindex(index=all_labels, columns=all_labels).round(2))
+                    #heatmap_data = dfasso.pivot(index='ANTECEDENT', columns='CONSEQUENT', values=metric).fillna(0).round(2)
+                    #st.write(heatmap_data)
+                    #st.write("Unique ANTECEDENTs:", dfasso['ANTECEDENT'].nunique())
+                    #st.write("Unique CONSEQUENTs:", dfasso['CONSEQUENT'].nunique())
+                    #st.write("Missing CONSEQUENTs in rows:", set(dfasso['CONSEQUENT'].unique()) - set(dfasso['ANTECEDENT'].unique()))
+                    # Step 2: Remove diagonal values by setting them to None
+                     # Step 2: Remove diagonal values by setting them to None
+                    for idx in heatmap_data.index:
+                        if idx in heatmap_data.columns:
+                            heatmap_data.at[idx, idx] = None
+                    # Step 3: Convert to ECharts-compatible list format (skip None values)
+                    #heatmap_list = [
+                    #    [i, j, float(heatmap_data.iloc[i, j])]  # Use float to avoid JSON errors
+                    #    for i in range(heatmap_data.shape[0])
+                    #    for j in range(heatmap_data.shape[1])
+                    #    if pd.notna(heatmap_data.iloc[i, j])
+                    #]
+                    heatmap_list = [
+                        [i, j, float(heatmap_data.iloc[i, j])]
+                        for i in range(len(all_labels))
+                        for j in range(len(all_labels))
+                        if pd.notna(heatmap_data.iloc[i, j])]
+                    # Step 4: Define options for ECharts heatmap
+                    options = {
+                        "tooltip": {"trigger": "item"},
+                        "grid": {
+                            "height": "80%",
+                            "top": "10%",
+                            "left": "10%",
+                            "right": "10%",
+                            "containLabel": True
                         },
-                        "outOfRange": {
-                            "color": "#ffffff"  # White background for 0 or None
-                        }
-                    },
-                    "series": [{
-                        "type": "heatmap",
-                        "data": heatmap_list,
-                        "label": {
-                            "show": True,
-                        },
-                        "emphasis": {
-                            "itemStyle": {
-                                "shadowBlur": 10,
-                                "shadowColor": "rgba(0, 0, 0, 0.5)"
+                        "xAxis": {
+                            "type": "category",
+                            #"data": heatmap_data.columns.tolist(),
+                            "data": all_labels,
+                            "splitArea": {"show": True},
+                            "axisLabel": {
+                                "interval": 0,
+                                "rotate": 45
                             }
-                        }
-                    }]
-                }
-                # Step 5: Render in Streamlit
-                st_echarts(
-                    options=options,
-                    height="700px",
-                    key=f"heatmap_{metric}"
-                )
+                        },
+                        "yAxis": {
+                            "type": "category",
+                            "data": all_labels,
+                            #"data": heatmap_data.index.tolist(),
+                            "splitArea": {"show": True}
+                        },
+                        "visualMap": {
+                            "min": heatmap_data.min().min(skipna=True),
+                            "max": heatmap_data.max().max(skipna=True),
+                            "calculable": True,
+                            "orient": "horizontal",
+                            "left": "center",
+                            "top": "0%",
+                            "inRange": {
+                                "color": ["#ffffff", "#e0f3f8", "#abd9e9", "#74add1", "#4575b4"]
+                            },
+                            "outOfRange": {
+                                "color": "#ffffff"  # White background for 0 or None
+                            }
+                        },
+                        "series": [{
+                            "type": "heatmap",
+                            "data": heatmap_list,
+                            "label": {
+                                "show": True,
+                            },
+                            "emphasis": {
+                                "itemStyle": {
+                                    "shadowBlur": 10,
+                                    "shadowColor": "rgba(0, 0, 0, 0.5)"
+                                }
+                            }
+                        }]
+                    }
+                    # Step 5: Render in Streamlit
+                    st_echarts(
+                        options=options,
+                        height="700px",
+                        key=f"heatmap_{metric}"
+                    )
         elif genre == 'Graph':
-            # Select a metric for edge color gradient and filter threshold
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                metric = st.selectbox('Choose a metric', dfasso.columns[5:])
-            with col2:
-                # Add slider to filter by top % of selected metric
-                filter_percentage = st.slider("Display Top %", 1, 100, 100, 
-                                             help=f"Show top X% of associations based on {metric if 'metric' in locals() else 'selected metric'}")
-            with col3:
-                # Add chart height control
-                chart_height = st.number_input("Chart Height (px)", min_value=400, max_value=2000, value=900, step=50,
-                                              help="Adjust the height of the network graph")
-            with col4:
-                st.write("")
-            with col5:
-                st.write("")
-            
-            with st.spinner("Generating graph visualization..."):
-                dfasso[metric] = dfasso[metric].astype(float)
+            with st.container(border=True):
+                # Select a metric for edge color gradient and filter threshold
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    metric = st.selectbox('Choose a metric', dfasso.columns[5:])
+                with col2:
+                    # Add slider to filter by top % of selected metric
+                    filter_percentage = st.slider("Display Top %", 1, 100, 100, 
+                                                 help=f"Show top X% of associations based on {metric if 'metric' in locals() else 'selected metric'}")
+                with col3:
+                    # Add chart height control
+                    chart_height = st.number_input("Chart Height (px)", min_value=400, max_value=2000, value=900, step=50,
+                                                  help="Adjust the height of the network graph")
+                with col4:
+                    st.write("")
+                with col5:
+                    st.write("")
                 
-                # Filter dataframe based on slider
-                if filter_percentage < 100:
-                    # Sort by selected metric and get top X%
-                    sorted_df = dfasso.sort_values(by=metric, ascending=False)
-                    num_rows = int(len(sorted_df) * (filter_percentage / 100))
-                    num_rows = max(1, num_rows)  # Ensure at least 1 row
-                    filtered_dfasso = sorted_df.head(num_rows)
+                with st.spinner("Generating graph visualization..."):
+                    dfasso[metric] = dfasso[metric].astype(float)
                     
-                    st.caption(f"Showing top {filter_percentage}% ({num_rows:,} out of {len(dfasso):,} associations) based on {metric}")
-                else:
-                    filtered_dfasso = dfasso
-                
-                # Visualize the graph with filtered data
-                sigma_graph(filtered_dfasso, metric, chart_height)
+                    # Filter dataframe based on slider
+                    if filter_percentage < 100:
+                        # Sort by selected metric and get top X%
+                        sorted_df = dfasso.sort_values(by=metric, ascending=False)
+                        num_rows = int(len(sorted_df) * (filter_percentage / 100))
+                        num_rows = max(1, num_rows)  # Ensure at least 1 row
+                        filtered_dfasso = sorted_df.head(num_rows)
+                        
+                        st.caption(f"Showing top {filter_percentage}% ({num_rows:,} out of {len(dfasso):,} associations) based on {metric}")
+                    else:
+                        filtered_dfasso = dfasso
+                    
+                    # Visualize the graph with filtered data
+                    sigma_graph(filtered_dfasso, metric, chart_height)
     
     # AI-Powered Insights with model selection (only show if toggle is on)
     if show_details:
