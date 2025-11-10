@@ -250,6 +250,10 @@ div[data-testid="stSuccess"] {
     margin-bottom: 10px;
 }
 
+.custom-container-1 h5 {
+    color: #0f0f0f !important;
+}
+
 /* Custom styling for all message types - aggressive rounded corners and tight margins */
 .stAlert,
 .stAlert *,
@@ -358,52 +362,21 @@ div[data-testid="stInfo"]::before {
     content: "" !important;
 }
 
-/* Override Streamlit's default alert styling more aggressively */
-div[data-testid="stAlert"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-}
-
-div[data-testid="stAlert"] > div {
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-/* Target all text content inside alerts */
-.stAlert p,
-.stAlert div,
-.stAlert span,
-div[data-testid="stAlert"] p,
-div[data-testid="stAlert"] div,
-div[data-testid="stAlert"] span {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* More specific targeting for alert types */
-div[data-testid="stSuccess"],
-div[data-testid="stInfo"],
-div[data-testid="stWarning"],
-div[data-testid="stError"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-    border-radius: 10px !important;
-}
 
 @media (prefers-color-scheme: dark) {
     .custom-container-1 {
         background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
+        border: 1px solid #4a4a4a !important;
+    }
+    
+    .custom-container-1 h5 {
+        color: #ffffff !important;
     }
     
     /* Custom styling for all message types in dark mode */
     .stAlert[data-baseweb="notification"] {
         background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
+        border: 1px solid #4a4a4a !important;
         --baseRadius: 10px !important;
         baseRadius: 10px !important;
         border-radius: 10px !important;
@@ -705,7 +678,7 @@ def sankeyPlot(res, direction, title_text="Sankey nPath", topN=15):
  #--------------------------------------
  #INTERACTIVE CLICKABLE SANKEY VIZ
  #--------------------------------------
-def sankey_chart(df, direction="from",topN_percentage=100):
+def sankey_chart(df, direction="from",topN_percentage=100, middle_events=None):
      dataDict = defaultdict(lambda: {"count": 0, "uids": []})  # Store counts + UIDs
      eventDict = defaultdict(int)
      indexed_paths = []
@@ -718,7 +691,71 @@ def sankey_chart(df, direction="from",topN_percentage=100):
  
      if topN:
       df = df.sort_values(by='COUNT', ascending=False).head(topN)
-     if direction == "to":
+     
+     if direction == "before_after" and middle_events:
+        # Special handling for BEFORE/AFTER pattern - center on middle event
+        # Parse middle_events (could be comma-separated string like "'Event1', 'Event2'")
+        if isinstance(middle_events, str):
+            middle_event_list = [e.strip().strip("'\"") for e in middle_events.split(',')]
+        else:
+            middle_event_list = [middle_events]
+        
+        # Find max events before middle event across all paths
+        max_before = 0
+        for _, row in df.iterrows():
+            rowList = [e.strip() for e in row['PATH'].split(',')]
+            for middle_event in middle_event_list:
+                if middle_event in rowList:
+                    pos = rowList.index(middle_event)
+                    max_before = max(max_before, pos)
+                    break
+        
+        # Now index paths with middle events aligned at max_before position
+        for _, row in df.iterrows():
+            rowList = [e.strip() for e in row['PATH'].split(',')]
+            pathCnt = row['COUNT']
+            uid_list = row['UID_LIST']
+            
+            # Find middle event position in this path
+            middle_pos = -1
+            for middle_event in middle_event_list:
+                if middle_event in rowList:
+                    middle_pos = rowList.index(middle_event)
+                    break
+            
+            if middle_pos == -1:
+                continue  # Skip paths without middle event
+            
+            # Calculate offset to align this path's middle event with max_before position
+            offset = max_before - middle_pos
+            indexedRowList = [f"{i + offset}_{rowList[i]}" for i in range(len(rowList))]
+            indexed_paths.append(",".join(indexedRowList))
+            
+            for i in range(len(indexedRowList) - 1):
+                leftValue = indexedRowList[i]
+                rightValue = indexedRowList[i + 1]
+                valuePair = leftValue + '|||' + rightValue
+                dataDict[valuePair]["count"] += pathCnt
+                dataDict[valuePair]["uids"].extend(uid_list)
+                eventDict[leftValue] += pathCnt
+                eventDict[rightValue] += pathCnt
+        
+        # Compute tooltips
+        for key, val in dataDict.items():
+            source_node, target_node = key.split('|||')
+            total_at_source = eventDict[source_node]
+            forward_percentage = (val["count"] / total_at_source * 100) if total_at_source > 0 else 0
+            source_parts = source_node.split('_', 1)
+            target_parts = target_node.split('_', 1)
+            source_display = source_parts[1] if len(source_parts) > 1 else source_node
+            target_display = target_parts[1] if len(target_parts) > 1 else target_node
+            val["tooltip"] = f"""
+                Path: {source_display} → {target_display}<br>
+                Count: {val["count"]}<br>
+                Forward %: {forward_percentage:.2f}%
+            """
+     
+     elif direction == "to":
          maxPath = df['COUNT'].max()
          for _, row in df.iterrows():
              rowList = row['PATH'].split(',')
@@ -730,56 +767,78 @@ def sankey_chart(df, direction="from",topN_percentage=100):
              for i in range(len(indexedRowList) - 1):
                  leftValue = indexedRowList[i]
                  rightValue = indexedRowList[i + 1]
-                 valuePair = leftValue + '+' + rightValue
+                 valuePair = leftValue + '|||' + rightValue
                  dataDict[valuePair]["count"] += pathCnt
                  dataDict[valuePair]["uids"].extend(uid_list)
                  eventDict[leftValue] += pathCnt
                  eventDict[rightValue] += pathCnt
          for key, val in dataDict.items():
-             source_node = key.split('+')[0]
-             target_node = key.split('+')[1]
+             # Split on delimiter (handles event names containing special chars)
+             source_node, target_node = key.split('|||')
+             # Safe extraction - handle cases where underscore might be missing
+             source_parts = source_node.split('_', 1)
+             target_parts = target_node.split('_', 1)
+             source_display = source_parts[1] if len(source_parts) > 1 else source_node
+             target_display = target_parts[1] if len(target_parts) > 1 else target_node
              tooltip_text = f"""
-                 Path: {source_node.split('_', 1)[1]} → {target_node.split('_', 1)[1]}<br>
+                 Path: {source_display} → {target_display}<br>
                  Count: {val["count"]}
              """
              val["tooltip"] = tooltip_text
      elif direction == "from":
-         for _, row in df.iterrows():
-             rowList = row['PATH'].split(',')
-             pathCnt = row['COUNT']
-             uid_list = row['UID_LIST']
-             indexedRowList = [f"{i}_{rowList[i].strip()}" for i in range(len(rowList))]
-             indexed_paths.append(",".join(indexedRowList))
-             for i in range(len(indexedRowList) - 1):
-                 leftValue = indexedRowList[i]
-                 rightValue = indexedRowList[i + 1]
-                 valuePair = leftValue + '+' + rightValue
-                 dataDict[valuePair]["count"] += pathCnt
-                 dataDict[valuePair]["uids"].extend(uid_list)
-                 eventDict[leftValue] += pathCnt
-                 eventDict[rightValue] += pathCnt
-         # Step 1: Compute drop-offs and forward percentage
-         for node in eventDict:
-             total_at_node = eventDict[node]
-             outgoing = sum(dataDict[f"{node}+{target}"]["count"] for target in eventDict if f"{node}+{target}" in dataDict)
-             dropoff = total_at_node - outgoing
-             dropoffDict[node] = dropoff
-         
-         # Step 2: Display drop-offs and forward percentages in the tooltip
-         for key, val in dataDict.items():
-             source_node = key.split('+')[0]
-             target_node = key.split('+')[1]
-             total_at_source = eventDict[source_node]
-             forward_percentage = (val["count"] / total_at_source * 100) if total_at_source > 0 else 0
-             dropoff_percentage = (dropoffDict[source_node] / total_at_source * 100) if total_at_source > 0 else 0
-             val["tooltip"] = f"""
-                 Path: {source_node.split('_', 1)[1]} → {target_node.split('_', 1)[1]}<br>
-                 Count: {val["count"]}<br>
-                 Forward %: {forward_percentage:.2f}%<br>
-                 Drop-off %: {dropoff_percentage:.2f}%
-             """
-     sortedEventList = sorted(eventDict.keys())
-     sankeyLabel = [event.split('_', 1)[1] for event in sortedEventList]  # Remove index suffix for display
+        for _, row in df.iterrows():
+            rowList = row['PATH'].split(',')
+            pathCnt = row['COUNT']
+            uid_list = row['UID_LIST']
+            indexedRowList = [f"{i}_{rowList[i].strip()}" for i in range(len(rowList))]
+            indexed_paths.append(",".join(indexedRowList))
+            for i in range(len(indexedRowList) - 1):
+                leftValue = indexedRowList[i]
+                rightValue = indexedRowList[i + 1]
+                valuePair = leftValue + '|||' + rightValue
+                dataDict[valuePair]["count"] += pathCnt
+                dataDict[valuePair]["uids"].extend(uid_list)
+                eventDict[leftValue] += pathCnt
+                eventDict[rightValue] += pathCnt
+        # Step 1: Compute drop-offs and forward percentage
+        for node in eventDict:
+            total_at_node = eventDict[node]
+            outgoing = sum(dataDict[f"{node}|||{target}"]["count"] for target in eventDict if f"{node}|||{target}" in dataDict)
+            dropoff = total_at_node - outgoing
+            dropoffDict[node] = dropoff
+        
+        # Step 2: Display drop-offs and forward percentages in the tooltip
+        for key, val in dataDict.items():
+            # Split on delimiter (handles event names containing special chars)
+            source_node, target_node = key.split('|||')
+            total_at_source = eventDict[source_node]
+            forward_percentage = (val["count"] / total_at_source * 100) if total_at_source > 0 else 0
+            dropoff_percentage = (dropoffDict[source_node] / total_at_source * 100) if total_at_source > 0 else 0
+            # Safe extraction - handle cases where underscore might be missing
+            source_parts = source_node.split('_', 1)
+            target_parts = target_node.split('_', 1)
+            source_display = source_parts[1] if len(source_parts) > 1 else source_node
+            target_display = target_parts[1] if len(target_parts) > 1 else target_node
+            val["tooltip"] = f"""
+                Path: {source_display} → {target_display}<br>
+                Count: {val["count"]}<br>
+                Forward %: {forward_percentage:.2f}%<br>
+                Drop-off %: {dropoff_percentage:.2f}%
+            """
+     # Ensure all nodes from links are also in the event list
+     all_nodes = set(eventDict.keys())
+     for key in dataDict.keys():
+         source_node, target_node = key.split('|||')
+         all_nodes.add(source_node)
+         all_nodes.add(target_node)
+     
+     sortedEventList = sorted(all_nodes)
+     # Safe extraction - handle cases where underscore might be missing
+     sankeyLabel = []
+     for event in sortedEventList:
+         parts = event.split('_', 1)
+         sankeyLabel.append(parts[1] if len(parts) > 1 else event)
+     
      st.session_state["sankey_labels"] = sankeyLabel
      st.session_state["sortedEventList"] = sortedEventList
      st.session_state["sankey_links"] = dataDict
@@ -788,8 +847,8 @@ def sankey_chart(df, direction="from",topN_percentage=100):
      sankeyValue = []
      sankeyLinks = []
      for key, val in dataDict.items():
-         source_node = key.split('+')[0]
-         target_node = key.split('+')[1]
+         # Split on delimiter (handles event names containing special chars)
+         source_node, target_node = key.split('|||')
          sankeySource.append(sortedEventList.index(source_node))
          sankeyTarget.append(sortedEventList.index(target_node))
          sankeyValue.append(val["count"])
@@ -806,14 +865,19 @@ def sankey_chart(df, direction="from",topN_percentage=100):
          "tooltip": {"trigger": "item"},
          "series": [{
              "type": "sankey",
+             "left": 30.0,
+             "top": 20.0,
+             "right": 120.0,
+             "bottom": 20.0,
              "layout": "none",
-             "data": [{"label": {"show": True, "formatter": label}} for node, label in zip(sortedEventList, sankeyLabel)],
+             "data": [{"label": {"show": True, "formatter": label, "color": "#888888"}} for node, label in zip(sortedEventList, sankeyLabel)],
              "links": sankeyLinks,
              "lineStyle": {"color": "source", "curveness": 0.5},
+             "label": {"color": "#888888"},
              "emphasis": {"focus": "adjacency"}
          }]
      }
-     return st_echarts(options=options, height="500px", key=f"sankey_chart_{st.session_state['last_df_hash']}", events={"click": "function(params) { return params.data; }"})
+     return st_echarts(options=options, height="600px", key=f"sankey_chart_{st.session_state['last_df_hash']}", events={"click": "function(params) { return params.data; }"})
  #----------------------
  # TREE VISUALIZATION
  #----------------------    
@@ -883,62 +947,88 @@ def convert_to_echarts_format_t(hierarchy, parent_path="", selected_node=None):
      
  
 def plot_tree(df, target, direction="to", selected_node=None):
-     hierarchy = build_tree_hierarchy(df, target, direction)
-     echarts_data = convert_to_echarts_format_t(hierarchy, selected_node=selected_node)
- 
-     # Set tree orientation based on direction
-     orient = "RL" if direction == "to" else "LR"  
-     label_position = "left" if direction == "to" else "right"
-     align = "right" if direction == "to" else "left"
- 
-     tree_options = {
-         "tooltip": {"trigger": "item", "triggerOn": "mousemove"},
-         "series": [
-             {
-                 "type": "tree",
-                 "data": echarts_data,
-                 "top": "5%",
-                 "left": "5%",
-                 "bottom": "5%",
-                 "right": "20%",
-                 "symbolSize": 15,
-                 "orient": orient,
-                 "label": {
-                     "position": label_position,
-                     "verticalAlign": "middle",
-                     "align": align,
-                     "fontSize": 10
-                 },
-                 "leaves": {
-                     "label": {
-                         "position": "right" if direction == "to" else "left",
-                         "verticalAlign": "middle",
-                         "align": "left" if direction == "to" else "right",
-                         "fontSize": 10,
-                     }
-                 },
-                 "expandAndCollapse": True,
-                 "initialTreeDepth": -1,
-                 "animationDuration": 550,
-                 "animationDurationUpdate": 750,
-                 "lineStyle": {
-                     "curveness": 0.6,
-                     "color": "#aaa"  
-                 },
-                 "layout": "orthogonal",
-                 "nodePadding": 40,
-                 "depth": 6
+    hierarchy = build_tree_hierarchy(df, target, direction)
+    echarts_data = convert_to_echarts_format_t(hierarchy, selected_node=selected_node)
+    
+    # Set tree orientation based on direction
+    orient = "RL" if direction == "to" else "LR"
+    label_position = "left" if direction == "to" else "right"
+    align = "right" if direction == "to" else "left"
+    
+    # Detect theme and set label styles accordingly
+    try:
+        theme_type = st.context.theme.type
+    except:
+        theme_type = "light"  # Default to light if detection fails
+    
+    if theme_type == "dark":
+        # Dark mode: light gray labels with dark border (original user setting)
+        label_config = {
+            "position": "right",
+            "verticalAlign": "middle",
+            "align": "left",
+            "fontSize": 11,
+            "color": "#888888",
+            "textBorderColor": "#1a1e24",
+            "textBorderWidth": 3,
+            "textShadowBlur": 2,
+            "textShadowColor": "#1a1e24"
+        }
+    else:
+        # Light mode: dark labels with white border for visibility
+        label_config = {
+            "position": "right",
+            "verticalAlign": "middle",
+            "align": "left",
+            "fontSize": 11,
+            "color": "#333333",
+            "textBorderColor": "#ffffff",
+            "textBorderWidth": 3,
+            "textShadowBlur": 2,
+            "textShadowColor": "#ffffff"
+        }
+
+    tree_options = {
+        "tooltip": {"trigger": "item", "triggerOn": "mousemove"},
+        "series": [
+            {
+                "type": "tree",
+                "data": echarts_data,
+                "top": "1%",
+                "left": "2%",
+                "bottom": "1%",
+                "right": "4%",
+                "symbolSize": 15,
+                "orient": orient,
+                "label": label_config,
+                "leaves": {
+                    "label": label_config
+                },
+                "emphasis": {
+                    "focus": 'descendant'
+                },
+                "expandAndCollapse": True,
+                "initialTreeDepth": -1,
+                "animationDuration": 550,
+                "animationDurationUpdate": 750,
+                "lineStyle": {
+                    "curveness": 0.6,
+                    "color": "#aaa"  
+                },
+                "layout": "orthogonal",
+                "nodePadding": 40,
+                "depth": 6
              }
          ]
      }
  
-     events = {
+    events = {
          "click": "function(params) { return {full_path: params.data.full_path, uids: params.data.uids}; }"
      }
      
-     clicked_node = st_echarts(options=tree_options, events=events, height="800px", width="100%")
+    clicked_node = st_echarts(options=tree_options, events=events, height="900px", width="100%")
  
-     return clicked_node
+    return clicked_node
      
  #---------------------------
  # SIGMA VIZ
@@ -946,110 +1036,124 @@ def plot_tree(df, target, direction="to", selected_node=None):
 def rgba_to_str(rgba):
   return f"rgba({int(rgba[0] * 255)}, {int(rgba[1] * 255)}, {int(rgba[2] * 255)}, {rgba[3]})"
 def sigma_graph(df):
- # Step 1: Extract event pairs and calculate weights
-     event_pairs = []
-     event_counts = Counter()
-     for _, row in df.iterrows():
-         path_str, weight = row["PATH"], row["COUNT"]
-         events = path_str.split(", ")
-         pairs = [(events[i], events[i + 1]) for i in range(len(events) - 1)]
-         for pair in pairs:
-             event_pairs.extend([pair] * weight)
-         for event in events:
-             event_counts[event] += weight
+    # Step 1: Extract event pairs and calculate weights
+    event_pairs = []
+    event_counts = Counter()
+    for _, row in df.iterrows():
+        path_str, weight = row["PATH"], row["COUNT"]
+        events = path_str.split(", ")
+        pairs = [(events[i], events[i + 1]) for i in range(len(events) - 1)]
+        for pair in pairs:
+            event_pairs.extend([pair] * weight)
+        for event in events:
+            event_counts[event] += weight
  
-     pair_counts = Counter(event_pairs)
-     total_events = sum(event_counts.values())
-     total_pairs = sum(pair_counts.values())
+    pair_counts = Counter(event_pairs)
+    total_events = sum(event_counts.values())
+    total_pairs = sum(pair_counts.values())
  
-     # Step 2: Create nodes with size based on event counts
-     unique_events = list(event_counts.keys())
-     max_count = max(event_counts.values())  # Normalize node size for visualization
+    # Step 2: Create nodes with size based on event counts
+    unique_events = list(event_counts.keys())
+    max_count = max(event_counts.values())  # Normalize node size for visualization
  
-     nodes = [
-         {
-             "name": event,
-             "symbolSize": 10 + (event_counts[event] / max_count) * 50,  # Base size + scaled size
-             "itemStyle": {
-                 "color": f"hsl({i * 360 / len(unique_events)}, 70%, 50%, 0.7)"  # Add transparency (0.7)
-             },
-             "label": {
-                 "show": True,
-                 "position": "right",
-                 "color": "#000000",  # Black font for simplicity
-                 "fontWeight": "normal",  # Bold font for node labels
-             },
-             "emphasis": {
-                 "itemStyle": {
-                     "color": f"hsl({i * 360 / len(unique_events)}, 70%, 50%, 0.7)"  # Maintain same color on hover
-                 },
-                 "label": {
-                     "color": "#000000",  # Keep the label color black on hover
-                     "fontWeight": "n"
-                 }
-             },
-             "tooltip": {
-                 "formatter": f"{event}<br>Count: {event_counts[event]}<br>Percentage: {event_counts[event] / total_events:.2%}"
-             },
-         }
-         for i, event in enumerate(unique_events)
-     ]
+    nodes = [
+        {
+            "name": event,
+            "symbolSize": 10 + (event_counts[event] / max_count) * 50,  # Base size + scaled size
+            "itemStyle": {
+                "color": f"hsl({i * 360 / len(unique_events)}, 70%, 50%, 0.7)"  # Add transparency (0.7)
+            },
+            "label": {
+                "show": True,
+                "position": "right",
+                "color": "#888888",  # Light gray - works in both light and dark mode
+                "fontWeight": "normal",
+            },
+            "emphasis": {
+                "itemStyle": {
+                    "color": f"hsl({i * 360 / len(unique_events)}, 70%, 50%, 0.7)"  # Maintain same color on hover
+                },
+                "label": {
+                    "color": "#ffffff",  # White label on hover
+                    "fontWeight": "bold",
+                }
+            },
+            "tooltip": {
+                "formatter": f"{event}<br>Count: {event_counts[event]}<br>Percentage: {event_counts[event] / total_events:.2%}"
+            },
+        }
+        for i, event in enumerate(unique_events)
+    ]
  
-     # Step 3: Create edges with logarithmic thickness based on count
+    # Step 3: Create edges with normalized thickness and YlOrRd color palette (Yellow-Orange-Red)
      
-     max_pair_count = max(pair_counts.values())
-     norm = Normalize(vmin=0, vmax=max_pair_count)
-     log_counts = {pair: np.log1p(count) for pair, count in pair_counts.items()}
-     log_max = max(log_counts.values())
-     max_width = 6
+    max_pair_count = max(pair_counts.values())
+    min_pair_count = min(pair_counts.values())
+    
+    # Normalize color scaling based on count (heat-map style: yellow → orange → red)
+    norm = Normalize(vmin=min_pair_count, vmax=max_pair_count)
+    
+    # Normalize thickness: always range from 1 to 5 regardless of actual values
+    min_width = 1.0
+    max_width = 5.0
+
+    edges = [
+        {
+            "source": src,
+            "target": tgt,
+            "lineStyle": {
+                # Normalize thickness to range [1, 4]
+                "width": min_width + (count - min_pair_count) / (max_pair_count - min_pair_count) * (max_width - min_width) if max_pair_count > min_pair_count else 2.0,
+                # Heat-map color: YlOrRd (Yellow-Orange-Red)
+                "color": rgba_to_str(plt.cm.YlOrRd(norm(count))),
+                "opacity": 0.85
+            },
+            "tooltip": {
+                "formatter": f"{src} → {tgt}<br>Count: {count}<br>Percentage: {count / total_pairs:.2%}"
+            },
+        }
+        for (src, tgt), count in pair_counts.items()
+    ]
  
-     edges = [
-         {
-             "source": src,
-             "target": tgt,
-             "lineStyle": {"width":min(np.log(count + 1), max_width) , "color": rgba_to_str(plt.cm.Blues(norm(count)))},  # Logarithmic scaling for edge thickness   # Color based on count
-             "tooltip": {
-                 "formatter": f"{src} → {tgt}<br>Count: {count}<br>Percentage: {count / total_pairs:.2%}"
-             },
-         }
-         for (src, tgt), count in pair_counts.items()
-     ]
+    # Step 4: ECharts options for force-directed graph
+    options = {
+        "tooltip": {"trigger": "item"},
+        "series": [
+            {
+                "type": "graph",
+                "layout": "force",
+                "symbolSize": 20,
+                "roam": True,
+                "label": {
+                    "show": True, 
+                    "fontSize": 12,
+                    "color": "#888888",  # Light gray - works in both light and dark mode
+                },
+                "edgeSymbol": ["circle", "arrow"],
+                "edgeSymbolSize": [4, 10],
+                "force": {
+                    "repulsion": 500,  # Increase repulsion to reduce overlap
+                    "edgeLength": [50, 200],  # Set minimum and maximum edge lengths
+                },
+                "data": nodes,
+                "links": edges,
+                "lineStyle": {
+                    "curveness": 0.1,  # Slight curvature for readability
+                    "opacity": 0.7,    # Slight transparency for overlapping edges
+                },
+                "emphasis": {
+                    "focus": "adjacency",
+                    "label": {
+                        "color": "#ffffff",  # White on hover
+                        "fontWeight": "bold",
+                    }
+                },
+            }
+        ],
+    }
  
-     # Step 4: ECharts options for force-directed graph
-     options = {
-         "tooltip": {"trigger": "item"},
-         "series": [
-             {
-                 "type": "graph",
-                 "layout": "force",
-                 "symbolSize": 20,
-                 "roam": True,
-                 "label": {"show": True, "fontSize": 12},
-                 "edgeSymbol": ["circle", "arrow"],
-                 "edgeSymbolSize": [4, 10],
-                 "force": {
-                     "repulsion": 500,  # Increase repulsion to reduce overlap
-                     "edgeLength": [50, 200],  # Set minimum and maximum edge lengths
-                 },
-                 "data": nodes,
-                 "links": edges,
-                 "lineStyle": {
-                     "curveness": 0.1,  # Slight curvature for readability
-                     "opacity": 0.7,    # Slight transparency for overlapping edges
-                 },
-                 "emphasis": {
-                 "focus": "adjacency",
-                 "label": {
-                     "color": "#ff0000",  # Highlight label color on hover
-                     "fontWeight": "bold"
-                     }
-                 },
-             }
-         ],
-     }
- 
-     # Step 5: Render the ECharts graph in Streamlit
-     st_echarts(options=options, height="800px")
+    # Step 5: Render the ECharts graph in Streamlit
+    st_echarts(options=options, height="800px")
  #--------------------
  #SUNBURST
  #--------------------
@@ -1215,14 +1319,16 @@ def process_and_generate_sunburst(df, direction="to"):
     
     # Display the Sunburst chart
     st_echarts(options=sunburst_options, height="600px")
-    #Legend configuration
-    legend_columns = st.columns(3)  
-    col_idx = 0
-    for event, color in color_map.items():
-        with legend_columns[col_idx]:
-            st.markdown(f"<span style='color:{color};font-weight:normal'>■</span> {event}", unsafe_allow_html=True)
+    
+    # Legend configuration in a bordered container with expander
+    with st.expander("Event legend", expanded=False, icon=":material/palette:"):
+        legend_columns = st.columns(3)  
+        col_idx = 0
+        for event, color in color_map.items():
+            with legend_columns[col_idx]:
+                st.markdown(f"<span style='color:{color};font-weight:normal'>■</span> {event}", unsafe_allow_html=True)
         
-        col_idx = (col_idx + 1) % 3
+        col_idx = (col_idx + 1) % 3 
 
 # Modified function to generate Sunburst chart with consistent colors
 def process_and_generate_sunburst_with_colors(df, direction="to", color_map=None):
@@ -1322,86 +1428,8 @@ colsdf1 = pd.DataFrame()
 #PAGE TITLE
 #--------------------------------------
 st.markdown("""
-    <style>
-    .custom-container-1 {
-        padding: 10px 10px 10px 10px;
-        border-radius: 10px;
-        background-color: #f0f2f6 !important; 
-        border: none;  /* No border in light mode */
-        margin-bottom: 20px;
-        transition: all 0.3s ease;
-    }
-    
-    /* Dark mode support for Path Analysis */
-    @media (prefers-color-scheme: dark) {
-        .custom-container-1 {
-            background-color: transparent !important;
-            border: 1px solid #29B5E8 !important;
-        }
-        
-        .custom-container-1 h5 {
-            color: #29B5E8 !important;
-        }
-        
-        /* Custom styling for st.success and st.info in dark mode */
-        .stAlert[data-baseweb="notification"] {
-            background-color: transparent !important;
-            border: 1px solid #29B5E8 !important;
-        }
-        
-        .stAlert[data-baseweb="notification"] > div {
-            background-color: transparent !important;
-        }
-    }
-    
-    /* Custom styling for st.success and st.info */
-    .stAlert[data-baseweb="notification"] {
-        background-color: #f0f2f6 !important;
-    }
-    
-    .stAlert[data-baseweb="notification"] > div {
-        background-color: #f0f2f6 !important;
-    }
-    
-    /* Remove default icons and customize */
-    .stAlert .stAlert-content::before {
-        content: none !important;
-    }
-    
-    /* Custom check icon for success */
-    .stAlert[kind="success"] .stAlert-content::before {
-        content: "✅" !important;
-        margin-right: 8px !important;
-        display: inline !important;
-    }
-    
-    /* Remove info icon */
-    .stAlert[kind="info"] .stAlert-content::before {
-        content: "" !important;
-    }
-
-    /* Fix for st.container(border=True) */
-    div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        border: 1px solid #d1d5db !important;
-        border-radius: 8px !important;
-        padding: 16px !important;
-        margin: 8px 0 !important;
-    }
-
-    /* Dark mode support for bordered containers */
-    @media (prefers-color-scheme: dark) {
-        div[data-testid="stVerticalBlock"] > div[style*="border"] {
-            border: 1px solid #29B5E8 !important;
-            background-color: transparent !important;
-        }
-    }
-    
-    </style>
-    """, unsafe_allow_html=True)
-
-st.markdown("""
     <div class="custom-container-1">
-        <h5 style="font-size: 18px; font-weight: normal; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+        <h5 style="font-size: 18px; font-weight: normal; margin-top: 0px; margin-bottom: -15px;">
             PATH ANALYSIS
         </h5>
     </div>
@@ -1501,72 +1529,149 @@ with tab1:
                     st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px;'>Events Pattern</h2>
         <hr style='margin-top: -8px;margin-bottom: 5px;'>
         """, unsafe_allow_html=True)
-                                
-                # Add a None placeholder to force user to select an event
-                options_with_placeholder_from = ["🔍"] + startdf1[evt].unique().tolist()
-                options_with_placeholder_to = ["🔎"] + enddf1[evt].unique().tolist()
                     
-                col1, col2, col3 = st.columns([1,1,1])
+                    # Pattern Mode Selection
+                    col1_mode, col2_mode, col3_mode = st.columns([1, 1, 1])
+                    with col1_mode:
+                        pattern_mode = st.radio("Pattern Mode", ["FROM/TO", "BEFORE&AFTER"], horizontal=True, 
+                                               help="FROM/TO: Analyze paths leading to or from or between selected events. BEFORE&AFTER: Analyze what happens before and after a middle event.")
+                    with col2_mode:
+                        st.write("")
+                    with col3_mode:
+                        st.write("")
+                
+                # Conditional UI based on pattern mode
+                if pattern_mode == "FROM/TO":
+                    # Original FROM/TO logic
+                    # Add a None placeholder to force user to select an event
+                    options_with_placeholder_from = ["🔍"] + startdf1[evt].unique().tolist()
+                    options_with_placeholder_to = ["🔎"] + enddf1[evt].unique().tolist()
+                        
+                    col1, col2, col3 = st.columns([1,1,1])
 
-                with col1:
-                    frm = st.multiselect('Select events FROM:', options=options_with_placeholder_from[1:], default=[],help="Select one or more events of interest to visualize paths FROM the selected point(s). 'Any' matches all values.")
-                    #filtered_frmevt = startdf1[(startdf1[evt] == frm)]
-                    #fromevt = filtered_frmevt.iloc[0, 0]
-                    if frm != "🔍":
-                        fromevt= ", ".join([f"'{value}'" for value in frm])
-                    else:
-                        fromevt = None  # Set to None if the placeholder is still selected
+                    with col1:
+                        frm = st.multiselect('Select events FROM:', options=options_with_placeholder_from[1:], default=[],help="Select one or more events of interest to visualize paths FROM the selected point(s). 'Any' matches all values.")
+                        #filtered_frmevt = startdf1[(startdf1[evt] == frm)]
+                        #fromevt = filtered_frmevt.iloc[0, 0]
+                        if frm != "🔍":
+                            fromevt= ", ".join([f"'{value}'" for value in frm])
+                        else:
+                            fromevt = None  # Set to None if the placeholder is still selected
+                            
+                    with col2:
+                        to = st.multiselect('Select events TO:', options=options_with_placeholder_to[1:], default=[],help="Select one or more events of interest to visualize paths TO the selected point(s). 'Any' matches all values.")
+                        #filtered_toevt = enddf1[(enddf1[evt] == to)]
+                        #toevt =filtered_toevt.iloc[0, 0]
+                        if to != "🔎":
+                            toevt = ", ".join([f"'{value}'" for value in to])
+                        else:
+                            toevt = None  # Set to None if the placeholder is still selected
+                            
+                    # Pattern approach pills - placed after both FROM and TO selections so we know the path type
+                    with col1:
+                        # Determine path type and set appropriate labels and tooltips
+                        both_any = (fromevt and fromevt.strip("'") == 'Any') and (toevt and toevt.strip("'") == 'Any') if 'toevt' in locals() else False
+                        is_path_to = (not fromevt or fromevt.strip("'") == 'Any') and toevt and toevt.strip("'") != 'Any'
+                        is_path_from = fromevt and fromevt.strip("'") != 'Any' and (not toevt or toevt.strip("'") == 'Any')
+                        is_path_between = fromevt and fromevt.strip("'") != 'Any' and toevt and toevt.strip("'") != 'Any'
+                        is_before_after = False  # Not in BEFORE/AFTER mode
+                        middle_event = None  # Initialize for FROM/TO mode
                         
-                    # Pattern approach pills under FROM column
-                    # Check if both FROM and TO are "Any" - disable Time Window for Any→Any
-                    both_any = (fromevt and fromevt.strip("'") == 'Any') and (toevt and toevt.strip("'") == 'Any') if 'toevt' in locals() else False
+                        if both_any:
+                            # Force Min/Max Events for Any→Any pattern
+                            st.info("ℹ️ Time Window not available for Any → Any patterns. Using Min/Max Events.")
+                            pattern_approach = "Min/Max Events"
+                            time_window_label = "Time Window"
+                            time_window_help = "Choose between event count limits or time-based window filtering"
+                        elif is_path_to:
+                            # PATH TO: Use "Lookback Window"
+                            time_window_label = "Lookback Window"
+                            time_window_help = "Choose between event count limits or lookback time window (captures events BEFORE the target event)"
+                            pattern_approach = st.pills("Pattern approach", ["Min/Max Events", time_window_label], default="Min/Max Events", help=time_window_help)
+                        elif is_path_from or is_path_between:
+                            # PATH FROM or PATH BETWEEN: Use "Look-forward Window"
+                            time_window_label = "Look-forward Window"
+                            time_window_help = "Choose between event count limits or look-forward time window (captures events AFTER the starting event)"
+                            pattern_approach = st.pills("Pattern approach", ["Min/Max Events", time_window_label], default="Min/Max Events", help=time_window_help)
+                        else:
+                            # Default fallback
+                            time_window_label = "Time Window"
+                            time_window_help = "Choose between event count limits or time-based window filtering"
+                            pattern_approach = st.pills("Pattern approach", ["Min/Max Events", time_window_label], default="Min/Max Events", help=time_window_help)
+                        
+                        # Show input controls below pills within the same column
+                        if pattern_approach == "Min/Max Events":
+                            # Min/Max events inputs - aligned under FROM selectbox width
+                            col_min, col_max = st.columns([1, 1])
+                            with col_min:
+                                minnbbevt = st.number_input("Min # events", value=0, placeholder="Type a number...", help="Select the minimum number of events either preceding or following the event(s) of interest.")
+                            with col_max:
+                                maxnbbevt = st.number_input("Max # events", value=5, min_value=1, placeholder="Type a number...", help="Select the maximum number of events either preceding or following the event(s) of interest.")
+                            
+                            # Set lookback variables to None for traditional approach
+                            max_gap_value = None
+                            gap_unit = None
+                            use_lookback = False
+                            
+                        else:  # Time Window (Lookback or Look-forward)
+                            # Time window inputs - aligned under FROM selectbox width
+                            col_time, col_unit = st.columns([1.5, 1])
+                            with col_time:
+                                if is_path_to:
+                                    max_gap_value = st.number_input("Lookback period", value=7, min_value=1, placeholder="Type a number...", help="Maximum lookback time window (how far back to look before the target event)")
+                                else:
+                                    max_gap_value = st.number_input("Look-forward period", value=7, min_value=1, placeholder="Type a number...", help="Maximum look-forward time window (how far forward to look after the starting event)")
+                            with col_unit:
+                                gap_unit = st.selectbox("Time unit", ["MINUTE", "HOUR", "DAY"], index=2, help="Select the time unit for the time window")
+                            
+                            # Set traditional variables for time window approach  
+                            minnbbevt = 0
+                            maxnbbevt = 999999  # Large number to effectively disable event count limits
+                            use_lookback = True
+                        
+                    with col3:
+                        # Empty column for visual balance
+                        pass
+                
+                else:  # BEFORE/AFTER mode
+                    # UI for BEFORE/AFTER pattern
+                    col1, col2, col3 = st.columns([1,1,1])
                     
-                    if both_any:
-                        # Force Min/Max Events for Any→Any pattern
-                        st.info("ℹ️ Time Window not available for Any → Any patterns. Using Min/Max Events.")
-                        pattern_approach = "Min/Max Events"
-                    else:
-                        pattern_approach = st.pills("Pattern approach", ["Min/Max Events", "Time Window"], default="Min/Max Events", help="Choose between event count limits or time-based window filtering")
-                    
-                    # Show input controls below pills within the same column
-                    if pattern_approach == "Min/Max Events":
-                        # Min/Max events inputs in compact layout
-                        col_min, col_max = st.columns(2)
+                    with col1:
+                        # Middle event selection (no Any option)
+                        options_middle_event = ["🎯"] + [e for e in startdf1[evt].unique().tolist() if e != 'Any']
+                        middle_event_list = st.multiselect('Select middle event(s):', options=options_middle_event[1:], default=[],
+                                                          help="Select the event(s) of interest to see what happens before and after")
+                        
+                        if middle_event_list:
+                            middle_event = ", ".join([f"'{value}'" for value in middle_event_list])
+                        else:
+                            middle_event = None
+                        
+                        # Min/Max events inputs - aligned under middle event selectbox width
+                        col_min, col_max = st.columns([1, 1])
                         with col_min:
-                            minnbbevt = st.number_input("Min # events", value=0, placeholder="Type a number...", help="Select the minimum number of events either preceding or following the event(s) of interest.")
+                            minnbbevt = st.number_input("Min # events before/after", value=0, placeholder="Type a number...", 
+                                                       help="Minimum number of events before and after the middle event")
                         with col_max:
-                            maxnbbevt = st.number_input("Max # events", value=5, min_value=1, placeholder="Type a number...", help="Select the maximum number of events either preceding or following the event(s) of interest.")
+                            maxnbbevt = st.number_input("Max # events before/after", value=5, min_value=1, placeholder="Type a number...",
+                                                       help="Maximum number of events before and after the middle event")
                         
-                        # Set lookback variables to None for traditional approach
+                        # Set variables for BEFORE/AFTER mode
+                        fromevt = None
+                        toevt = None
                         max_gap_value = None
                         gap_unit = None
                         use_lookback = False
+                        is_path_to = False
+                        is_path_from = False
+                        is_path_between = False
+                        is_before_after = True
                         
-                    else:  # Time Window
-                        # Time window inputs in compact layout
-                        col_time, col_unit = st.columns(2)
-                        with col_time:
-                            max_gap_value = st.number_input("Time window", value=7, min_value=1, placeholder="Type a number...", help="Maximum time window for path pattern filtering")
-                        with col_unit:
-                            gap_unit = st.selectbox("Time unit", ["MINUTE", "HOUR", "DAY"], index=2, help="Select the time unit for the time window")
-                        
-                        # Set traditional variables for time window approach  
-                        minnbbevt = 0
-                        maxnbbevt = 999999  # Large number to effectively disable event count limits
-                        use_lookback = True
-               
-                with col2:
-                    to = st.multiselect('Select events TO:', options=options_with_placeholder_to[1:], default=[],help="Select one or more events of interest to visualize paths TO the selected point(s). 'Any' matches all values.")
-                    #filtered_toevt = enddf1[(enddf1[evt] == to)]
-                    #toevt =filtered_toevt.iloc[0, 0]
-                    if to != "🔎":
-                        toevt = ", ".join([f"'{value}'" for value in to])
-                    else:
-                        toevt = None  # Set to None if the placeholder is still selected
-                        
-                with col3:
-                    # Empty column for visual balance
-                    pass
+                    with col2:
+                        st.write("")
+                    with col3:
+                        st.write("")
                
                 col1, col2 = st.columns([5,10])
                 with col1:
@@ -1687,170 +1792,394 @@ with tab1:
                 # Only execute filter logic if there are available columns AND the toggle is enabled
                 if checkfilters and not remaining_columns.empty:
                     with st.container():
-                            # Helper to get cached distinct values as a Python list
-                            def get_distinct_values_list(column):
-                                df_vals = fetch_distinct_values(session, database, schema, tbl, column)
-                                return df_vals.iloc[:, 0].tolist() if not df_vals.empty else []
-                    
-                            # Helper function to display operator selection based on column data type
-                            def get_operator_input(col_name, col_data_type, filter_index):
-                                """ Returns the operator for filtering based on column type """
-                                operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
-                    
-                                if col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
-                                    operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL'], key=operator_key)
-                                elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                    operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IS NULL', 'IS NOT NULL'], key=operator_key)
-                                else:  # For string or categorical columns
-                                    operator = st.selectbox("Operator", ['=', '!=', 'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'], key=operator_key)
-                                return operator
-                    
-                            # Helper function to display value input based on column data type
-                            def get_value_input(col_name, col_data_type, operator, filter_index):
-                                """ Returns the value for filtering based on column type """
-                                value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
-                    
-                                # Handle NULL operators - no value input needed
-                                if operator in ['IS NULL', 'IS NOT NULL']:
-                                    return None
-                                
-                                # Handle IN and NOT IN operators
-                                elif operator in ['IN', 'NOT IN']:
-                                    distinct_values = get_distinct_values_list(col_name)
-                                    value = st.multiselect(f"Values for {col_name}", distinct_values, key=value_key)
-                                    return value
-                                
-                                # Handle LIKE and NOT LIKE operators
-                                elif operator in ['LIKE', 'NOT LIKE']:
-                                    value = st.text_input(f"Pattern for {col_name} (use % for wildcards)", key=value_key, placeholder="e.g., %text% or prefix%")
-                                    return value
-                                
-                                # Handle date/timestamp columns
-                                elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
-                                    value = st.date_input(f"Value for {col_name}", key=value_key)
-                                    return value
-                                
-                                # Handle numeric columns with accept_new_options for manual input
-                                elif col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
-                                    distinct_values = get_distinct_values_list(col_name)
-                                    value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key, accept_new_options=True)
-                                    return value
-                                
-                                # Handle other data types (strings, etc.)
-                                else:
-                                    distinct_values = get_distinct_values_list(col_name)
-                                    value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key)
+                        # Helper to get cached distinct values as a Python list
+                        def get_distinct_values_list(column):
+                            df_vals = fetch_distinct_values(session, database, schema, tbl, column)
+                            return df_vals.iloc[:, 0].tolist() if not df_vals.empty else []
+                
+                        # Helper function to display operator selection based on column data type
+                        def get_operator_input(col_name, col_data_type, filter_index):
+                            """ Returns the operator for filtering based on column type """
+                            operator_key = f"{col_name}_operator_{filter_index}"  # Ensure unique key
+                
+                            if col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IN', 'NOT IN', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                            elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
+                                operator = st.selectbox("Operator", ['=', '<', '<=', '>', '>=', '!=', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                            else:  # For string or categorical columns
+                                operator = st.selectbox("Operator", ['=', '!=', 'IN', 'NOT IN', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'], key=operator_key)
+                            return operator
+                
+                        # Helper function to display value input based on column data type
+                        def get_value_input(col_name, col_data_type, operator, filter_index):
+                            """ Returns the value for filtering based on column type """
+                            value_key = f"{col_name}_value_{filter_index}"  # Ensure unique key
+                
+                            # Handle NULL operators - no value input needed
+                            if operator in ['IS NULL', 'IS NOT NULL']:
+                                return None
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator in ['IN', 'NOT IN']:
+                                distinct_values = get_distinct_values_list(col_name)
+                                value = st.multiselect(f"Values for {col_name}", distinct_values, key=value_key)
                                 return value
-                    
-                            # Initialize variables to store filters and logical conditions
-                            filters = []
-                            logic_operator = None
-                            filter_index = 0
-                    
-                            while True:
-                                available_columns = remaining_columns  # Columns available for filtering
-                    
-                                if available_columns.empty:
-                                    st.write("No more columns available for filtering.")
-                                    break  # Stop the loop if no columns remain
-                    
-                                # Create 3 columns for column selection, operator, and value input
-                                col1, col2, col3 = st.columns([2, 1, 2])
-                    
-                                with col1:
-                                    selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns)
-                    
-                                # Determine column data type (cached)
-                                col_data_type = fetch_column_type(session, database, schema, tbl, selected_column)
-                    
-                                with col2:
-                                    operator = get_operator_input(selected_column, col_data_type, filter_index)
-                    
-                                with col3:
-                                    value = get_value_input(selected_column, col_data_type, operator, filter_index)
-                    
-                                # Append filter if valid
-                                if operator:
-                                    if operator in ['IS NULL', 'IS NOT NULL']:
-                                        filters.append((selected_column, operator, None))
-                                    elif operator in ['IN', 'NOT IN'] and value:
-                                        filters.append((selected_column, operator, value))
-                                    elif operator not in ['IS NULL', 'IS NOT NULL', 'IN', 'NOT IN'] and (value is not None and value != ''):
-                                        filters.append((selected_column, operator, value))
-                    
-                                # Ask user if they want another filter
-                                add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_{filter_index}")
-                    
-                                if add_filter == 'Yes':
-                                    col1, col2 = st.columns([2, 13])
-                                    with col1: 
-                                        logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_{filter_index}")
-                                        filter_index += 1
-                                    with col2:
-                                        st.write("")
-                                else:
-                                    break
                             
-                            # Generate SQL WHERE clause based on selected filters and logic
-                            if filters:
-                                
-                                sql_where_clause = " AND "
-                                #st.write(filters)
-                                for i, (col, operator, value) in enumerate(filters):
-                                    if i > 0 and logic_operator:
-                                        sql_where_clause += f" {logic_operator} "
-                                    
-                                    # Handle NULL operators
-                                    if operator in ['IS NULL', 'IS NOT NULL']:
-                                        sql_where_clause += f"{col} {operator}"
-                                    
-                                    # Handle IN and NOT IN operators
-                                    elif operator in ['IN', 'NOT IN']:
-                                        if len(value) == 1:
-                                            # Single value - convert to = or != for better performance
-                                            single_op = '=' if operator == 'IN' else '!='
-                                            if isinstance(value[0], (int, float)):
-                                                sql_where_clause += f"{col} {single_op} {value[0]}"
-                                            else:
-                                                sql_where_clause += f"{col} {single_op} '{value[0]}'"
-                                        else:
-                                            # Multiple values - use proper IN/NOT IN with tuple
-                                            # Handle mixed types by converting all to strings for SQL safety
-                                            formatted_values = []
-                                            for v in value:
-                                                if isinstance(v, (int, float)):
-                                                    formatted_values.append(str(v))
-                                                else:
-                                                    formatted_values.append(f"'{v}'")
-                                            sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
-                                    
-                                    # Handle LIKE and NOT LIKE operators
-                                    elif operator in ['LIKE', 'NOT LIKE']:
-                                        sql_where_clause += f"{col} {operator} '{value}'"
-                                    
-                                    # Handle other operators (=, !=, <, <=, >, >=)
-                                    else:
-                                        if isinstance(value, (int, float)):
-                                            sql_where_clause += f"{col} {operator} {value}"
-                                        else:
-                                            # For non-numeric values (strings, dates), enclose the value in quotes
-                                            sql_where_clause += f"{col} {operator} '{value}'"        
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator in ['LIKE', 'NOT LIKE']:
+                                value = st.text_input(f"Pattern for {col_name} (use % for wildcards)", key=value_key, placeholder="e.g., %text% or prefix%")
+                                return value
                             
+                            # Handle date/timestamp columns
+                            elif col_data_type in ['TIMESTAMP', 'DATE', 'DATETIME', 'TIMESTAMP_NTZ']:
+                                value = st.date_input(f"Value for {col_name}", key=value_key)
+                                return value
+                            
+                            # Handle numeric columns with accept_new_options for manual input
+                            elif col_data_type in ['NUMBER', 'FLOAT', 'INT', 'DECIMAL']:
+                                distinct_values = get_distinct_values_list(col_name)
+                                value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key, accept_new_options=True)
+                                return value
+                            
+                            # Handle other data types (strings, etc.)
                             else:
+                                distinct_values = get_distinct_values_list(col_name)
+                                value = st.selectbox(f"Value for {col_name}", distinct_values, key=value_key)
+                            return value
+                
+                        # Initialize variables to store filters and logical conditions
+                        filters = []
+                        logic_operator = None
+                        filter_index = 0
+                
+                        while True:
+                            available_columns = remaining_columns  # Columns available for filtering
+                
+                            if available_columns.empty:
+                                st.write("No more columns available for filtering.")
+                                break  # Stop the loop if no columns remain
+                
+                            # Create 3 columns for column selection, operator, and value input
+                            col1, col2, col3 = st.columns([2, 1, 2])
+                
+                            with col1:
+                                selected_column = st.selectbox(f"Column (filter {filter_index + 1})", available_columns)
+                
+                            # Determine column data type (cached)
+                            col_data_type = fetch_column_type(session, database, schema, tbl, selected_column)
+                
+                            with col2:
+                                operator = get_operator_input(selected_column, col_data_type, filter_index)
+                
+                            with col3:
+                                value = get_value_input(selected_column, col_data_type, operator, filter_index)
+                
+                            # Append filter if valid
+                            if operator:
+                                if operator in ['IS NULL', 'IS NOT NULL']:
+                                    filters.append((selected_column, operator, None))
+                                elif operator in ['IN', 'NOT IN'] and value:
+                                    filters.append((selected_column, operator, value))
+                                elif operator not in ['IS NULL', 'IS NOT NULL', 'IN', 'NOT IN'] and (value is not None and value != ''):
+                                    filters.append((selected_column, operator, value))
+                
+                            # Ask user if they want another filter
+                            add_filter = st.radio(f"Add another filter after {selected_column}?", ['No', 'Yes'], key=f"add_filter_{filter_index}")
+                
+                            if add_filter == 'Yes':
+                                col1, col2 = st.columns([2, 13])
+                                with col1: 
+                                    logic_operator = st.selectbox(f"Choose logical operator after filter {filter_index + 1}", ['AND', 'OR'], key=f"logic_operator_{filter_index}")
+                                    filter_index += 1
+                                with col2:
+                                    st.write("")
+                            else:
+                                break
+                        
+                        # Generate SQL WHERE clause based on selected filters and logic
+                        if filters:
+                                
+                            sql_where_clause = " AND "
+                        #st.write(filters)
+                        for i, (col, operator, value) in enumerate(filters):
+                            if i > 0 and logic_operator:
+                                sql_where_clause += f" {logic_operator} "
+                            
+                            # Handle NULL operators
+                            if operator in ['IS NULL', 'IS NOT NULL']:
+                                sql_where_clause += f"{col} {operator}"
+                            
+                            # Handle IN and NOT IN operators
+                            elif operator in ['IN', 'NOT IN']:
+                                if len(value) == 1:
+                                    # Single value - convert to = or != for better performance
+                                    single_op = '=' if operator == 'IN' else '!='
+                                    if isinstance(value[0], (int, float)):
+                                        sql_where_clause += f"{col} {single_op} {value[0]}"
+                                    else:
+                                        sql_where_clause += f"{col} {single_op} '{value[0]}'"
+                                else:
+                                    # Multiple values - use proper IN/NOT IN with tuple
+                                    # Handle mixed types by converting all to strings for SQL safety
+                                    formatted_values = []
+                                    for v in value:
+                                        if isinstance(v, (int, float)):
+                                            formatted_values.append(str(v))
+                                        else:
+                                            formatted_values.append(f"'{v}'")
+                                    sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
+                            
+                            # Handle LIKE and NOT LIKE operators
+                            elif operator in ['LIKE', 'NOT LIKE']:
+                                sql_where_clause += f"{col} {operator} '{value}'"
+                            
+                            # Handle other operators (=, !=, <, <=, >, >=)
+                            else:
+                                    if isinstance(value, (int, float)):
+                                        sql_where_clause += f"{col} {operator} {value}"
+                                    else:
+                                 # For non-numeric values (strings, dates), enclose the value in quotes
+                                        sql_where_clause += f"{col} {operator} '{value}'"        
+                            
+                        else:
                                 # If no filters were created, ensure sql_where_clause is empty
-                                sql_where_clause = ""
-    
+                            sql_where_clause = ""
+        
     # SQL LOGIC
     # Check pattern an run SQL accordingly
             
 
-    if all([uid, evt, tmstp,fromevt, toevt]):
+    # Initialize pattern_mode and middle_event if not already defined
+    if 'pattern_mode' not in locals():
+        pattern_mode = "FROM/TO"
+    if 'middle_event' not in locals():
+        middle_event = None
+
+    # Validation check depends on pattern mode
+    inputs_valid = False
+    if pattern_mode == "BEFORE&AFTER":
+        inputs_valid = all([uid, evt, tmstp, middle_event])
+    else:  # FROM/TO mode
+        inputs_valid = all([uid, evt, tmstp, fromevt, toevt])
+    
+    if inputs_valid:
         # Now we can proceed with the SQL logic and any further processing
         
         # Continue with SQL generation and execution based on inputs...
 
+        # BEFORE/AFTER: Pattern = A{{{minnbbevt},{maxnbbevt}}} B A{{{minnbbevt},{maxnbbevt}}}
+        if pattern_mode == "BEFORE&AFTER" and middle_event:
+            
+            # Initialize result containers
+            before_after_agg=None
+            before_after_agg_sql= None
+            
+            # Aggregate results for plot
+            if unitoftime==None and timeout ==None :
+                before_after_agg_sql = f"""
+                select path, count(*) as count,array_agg({uid}) as uid_list from (
+                    select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                        from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+                            match_recognize(
+                            {partitionby} 
+                            order by {tmstp}  
+                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                            all rows per match
+                            AFTER MATCH SKIP {overlap} 
+                            pattern(A{{{minnbbevt},{maxnbbevt}}} B A{{{minnbbevt},{maxnbbevt}}})
+                            define A as true, B AS {evt} IN({middle_event}))
+                    {groupby} ) 
+                group by path order by count desc 
+                """
+            elif unitoftime != None and timeout !=None :
+                before_after_agg_sql = f"""
+            select path, count(*) as count,array_agg({uid}) as uid_list from (
+                select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
+                    from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
+                    {tmstp}) AS TIMEWINDOW
+                 FROM
+                {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
+         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
+        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
+        FROM events_with_diff)
+        SELECT *FROM sessions)
+                        match_recognize(
+                        {partitionby} 
+                        order by {tmstp}  
+                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
+                        all rows per match
+                        AFTER MATCH SKIP {overlap} 
+                        pattern(A{{{minnbbevt},{maxnbbevt}}} B A{{{minnbbevt},{maxnbbevt}}})
+                        define A as true, B AS {evt} IN({middle_event}))
+                {groupby} ) 
+            group by path order by count desc 
+            """
+            
+            before_after_agg = session.sql(before_after_agg_sql).collect()
+            res = pd.DataFrame(before_after_agg)
+            import ast
+            
+            if not res.empty:
+                def convert_uid_list(uid_entry):
+                    if isinstance(uid_entry, str):
+                        try:
+                            return ast.literal_eval(uid_entry)  # Safely convert string to list
+                        except:
+                            return []
+                    elif isinstance(uid_entry, list):
+                        return uid_entry
+                    else:
+                        return []
+                
+                res['UID_LIST'] = res['UID_LIST'].apply(convert_uid_list)
+                
+                # Save results
+                st.session_state['before_after_agg'] = res
+                
+                # Display success message
+                st.markdown(f"""
+                <div class="custom-container-1">
+                    <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                        Analysis complete: {len(res):,} unique paths retrieved from {res['COUNT'].sum():,} customer journeys
+                    </h5>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Create two columns for layout
+                col1, col2 = st.columns([2, 7])
+            
+                # Place the toggle in the first column
+                with col1:
+                    show_details_ba = st.toggle("Show me!", key="show_details_ba", help="Select a visualization option: Sankey or Graph.")
+
+                # Place the pills in the second column, but only if the toggle is on
+                with col2:
+                    if 'show_details_ba' in locals() and show_details_ba:
+                        genre_ba = st.pills(
+                            "Choose a visualization:",
+                            ["Sankey", "Graph"],
+                            label_visibility="collapsed",
+                            key="genre_ba"
+                        )
+                    else:
+                        genre_ba = None
+            
+                # Place the visualization outside of the columns layout
+                if show_details_ba and genre_ba:
+                    # Initialize hash for session state tracking
+                    current_df_hash = hash(res.to_json())
+                    if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                        st.session_state["last_df_hash"] = current_df_hash
+                    
+                    if genre_ba == 'Sankey':
+                        with st.container(border=True):
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                percentage_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_ba")
+                            with col2:
+                                st.write("")
+                            
+                            clicked_sankey_ba = sankey_chart(res, direction="before_after", topN_percentage=percentage_ba, middle_events=middle_event)
+                        
+                        if clicked_sankey_ba:
+                            sankeyLabel = st.session_state.get("sankey_labels", [])
+                            sortedEventList = st.session_state.get("sortedEventList", [])
+                            sankeyLinks = st.session_state.get("sankey_links", {})
+                            if "source" in clicked_sankey_ba and "target" in clicked_sankey_ba:
+                                source_index = clicked_sankey_ba["source"]
+                                target_index = clicked_sankey_ba["target"]
+                                clicked_source = sortedEventList[source_index]
+                                clicked_target = sortedEventList[target_index]
+                                source_parts = clicked_source.split('_', 1)
+                                target_parts = clicked_target.split('_', 1)
+                                source_name = source_parts[1] if len(source_parts) >= 2 else clicked_source
+                                target_name = target_parts[1] if len(target_parts) >= 2 else clicked_target
+                                st.caption(f"Selected Edge: {source_name} → {target_name}")
+                    
+                    elif genre_ba == 'Graph':
+                        with st.container(border=True):
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                percentage_graph_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_graph_ba")
+                            with col2:
+                                st.write("")
+                            
+                            topN_graph_ba = int(len(res) * percentage_graph_ba / 100)
+                            sigma_graph(res.head(topN_graph_ba))
+                
+                # View SQL toggle
+                if st.toggle("View SQL for Aggregated Paths", key="view_sql_ba", help="View the SQL query used for this analysis"):
+                    st.code(before_after_agg_sql, language="sql")
+                
+                # Writeback toggle
+                if st.toggle("Writeback Segments to Snowflake", key="writeback_before_after",
+                            help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                    with st.expander("Writeback Segments to Snowflake", expanded=True, icon=":material/upload:"):
+                        # Path selection
+                        st.markdown("**Select Paths to Export**")
+                        
+                        # Select All checkbox
+                        select_all_before_after = st.checkbox("Select All Paths", value=False, key="select_all_before_after")
+                        
+                        # Multiselect for paths
+                        if select_all_before_after:
+                            default_paths_before_after = res['PATH'].tolist()
+                        else:
+                            default_paths_before_after = []
+                        
+                        selected_paths_before_after = st.multiselect(
+                            "Choose path(s):",
+                            options=res['PATH'].tolist(),
+                            default=default_paths_before_after,
+                            key="selected_paths_before_after"
+                        )
+                        
+                        if selected_paths_before_after:
+                            # Filter dataframe
+                            filtered_df_before_after = res[res['PATH'].isin(selected_paths_before_after)]
+                            
+                            # Show export preview
+                            st.info(f"📊 Export Preview: {len(selected_paths_before_after)} path(s) selected, "
+                                   f"{filtered_df_before_after['COUNT'].sum():,} total occurrences, "
+                                   f"{filtered_df_before_after['UID_LIST'].apply(len).sum():,} total user IDs", 
+                                   icon=":material/info:")
+                            
+                            # Database/Schema/Table selection
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                wb_database_before_after = st.selectbox("Database", fetch_databases(session), key="wb_db_before_after")
+                            with col2:
+                                if wb_database_before_after:
+                                    wb_schema_before_after = st.selectbox("Schema", fetch_schemas(session, wb_database_before_after), key="wb_schema_before_after")
+                            
+                            wb_table_before_after = st.text_input("Table Name", value="PATH_SEGMENTS_BEFORE_AFTER", key="wb_table_before_after")
+                            
+                            wb_mode_before_after = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_before_after")
+                            
+                            if st.button("Write Table", key="write_btn_before_after"):
+                                if wb_database_before_after and wb_schema_before_after and wb_table_before_after:
+                                    try:
+                                        with st.spinner("Writing to Snowflake..."):
+                                            # Create Snowpark DataFrame
+                                            export_df_before_after = session.create_dataframe(filtered_df_before_after[['PATH', 'COUNT', 'UID_LIST']])
+                                            
+                                            # Write to table
+                                            if wb_mode_before_after == "Create or Replace":
+                                                export_df_before_after.write.mode("overwrite").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
+                                            else:
+                                                export_df_before_after.write.mode("append").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
+                                            
+                                            st.success(f"✅ Successfully wrote {len(filtered_df_before_after)} rows to {wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}", 
+                                                      icon=":material/check:")
+                                    except Exception as e:
+                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/error:")
+                                else:
+                                    st.warning("Please select database, schema, and table name", icon=":material/warning:")
+            else:
+                st.info("No patterns found matching the criteria.", icon=":material/info:")
+        
         # PATH TO: Pattern = A{{{minnbbevt},{maxnbbevt}}} B
-        if fromevt.strip("'") == 'Any' and toevt.strip("'") != 'Any':
+        elif pattern_mode == "FROM/TO" and fromevt.strip("'") == 'Any' and toevt.strip("'") != 'Any':
             
             path_to_agg=None
             path_to_det_df=None
@@ -1860,7 +2189,7 @@ with tab1:
             if unitoftime==None and timeout ==None :
                 
                 if use_lookback:
-                    # Lookback window approach for PATH TO (look back from TO event)
+                    # Lookback window approach for PATH TO (captures events BEFORE the target event)
                     path_to_agg_sql = f"""
                     select path, count(*) as count,array_agg({uid}) as uid_list from (
                         select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
@@ -1965,11 +2294,29 @@ with tab1:
                 if not res.empty:
                     displayed_paths = len(res)
                     if total_paths <= topn:
-                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
-                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                    st.markdown("""
+                    <div class="custom-container-1">
+                        <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                            No paths found matching the specified criteria
+                        </h5>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Create two columns for layout
                 col1, col2 = st.columns([2, 7])
@@ -2034,7 +2381,7 @@ with tab1:
                                 clicked_source = sortedEventList[source_index]
                                 clicked_target = sortedEventList[target_index]
                                 st.caption(f"Selected Edge: {clicked_source.split('_', 1)[1]} → {clicked_target.split('_', 1)[1]}")
-                                valuePair = f"{clicked_source}+{clicked_target}"
+                                valuePair = f"{clicked_source}|||{clicked_target}"
                                 extracted_uids = sankeyLinks.get(valuePair, {}).get("uids", [])
                                 #st.write(f"👤 Extracted UIDs: {extracted_uids}")
                                 flattened_uids = set()
@@ -2302,91 +2649,90 @@ with tab1:
                 if st.toggle("View SQL for Aggregated Paths"):    
                     st.code(path_to_agg_sql, language='sql')
 
-            if st.toggle("View Detailed Individual Paths"):
-                    # Individual Paths SQL
-                if unitoftime==None and timeout ==None :
-                    
-                    if use_lookback:
-                        # Lookback window approach for PATH TO detailed paths (look back from TO event)
-                        path_to_det_sql = f"""
-                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                        from (
-                            WITH TO_EVENT_TIMES AS (
-                                SELECT {uid}, {tmstp}, {evt},
-                                       MIN(CASE WHEN {evt} IN ({toevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as to_event_time
-                                FROM {database}.{schema}.{tbl} 
-                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
-                            ),
-                            TIME_WINDOWED AS (
-                                SELECT {uid}, {tmstp}, {evt}
-                                FROM TO_EVENT_TIMES
-                                WHERE to_event_time IS NOT NULL 
-                                  AND TIMESTAMPDIFF({gap_unit}, {tmstp}, to_event_time) BETWEEN 0 AND {max_gap_value}
-                            )
-                            SELECT * FROM TIME_WINDOWED
-                        ) match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A* B) 
-                            define A as true, B AS {evt} IN ({toevt})
-                        ) {groupby} """
-                    else:
-                        # Traditional min/max events approach for detailed paths
-                        path_to_det_sql = f"""
-                        select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
-                            from (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
-                            define A as true, B AS {evt} IN ({toevt})
-                        )  {groupby} """
-        
-                    # Run the SQL
-                    path_to_det_df = session.sql(path_to_det_sql).collect()
-        
-                    # View Individual Paths Output
-                    st.subheader ('Detailed Individual Paths', divider="grey")
-                    st.dataframe(path_to_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_to_det_sql, language='sql')
+            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_to", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                    # Use aggregated paths data already computed for visualization
+                    if path_to_agg is not None and len(path_to_agg) > 0:
+                        # Convert to DataFrame for easier manipulation
+                        paths_df = pd.DataFrame(path_to_agg)
                         
-                elif unitoftime != None and timeout !=None :
-                    path_to_det_sql = f"""
-                    select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
-                SELECT *FROM sessions) 
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
-                        define A as true, B AS {evt} IN ({toevt})
-                    )  {groupby} """
-                    
-                       # Run the SQL
-                    path_to_det_df = session.sql(path_to_det_sql).collect()
-        
-                    # View Individual Paths Output
-                    st.subheader ('Detailed Individual Paths', divider="grey")
-                    st.dataframe(path_to_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_to_det_sql, language='sql')
+                        # Path selector
+                        available_paths = paths_df['PATH'].tolist()
+                        
+                        # Select All checkbox
+                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_to")
+                        
+                        # Determine default selection based on checkbox
+                        if select_all:
+                            default_selection = available_paths
+                        else:
+                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
+                        
+                        selected_paths = st.multiselect(
+                            "Choose one or more paths",
+                            options=available_paths,
+                            default=default_selection,
+                            key="wb_path_select_to",
+                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                        )
+                        
+                        if selected_paths:
+                            # Show preview
+                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                            st.info(f"Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                            
+                            # Fetch DBs using cached method
+                            db0 = fetch_databases(session)
+                            
+                            # Database, Schema, Table selection
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_to", placeholder="Choose...")
+                            
+                            wb_schema = None
+                            if wb_database:
+                                schema0 = fetch_schemas(session, wb_database)
+                                
+                                with col2:
+                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_to", placeholder="Choose...")
+                            
+                            with col3:
+                                if wb_database and wb_schema:
+                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_to", placeholder="e.g. path_to_aggregated")
+                                else:
+                                    wb_table_name = None
+                            
+                            # Write mode and button
+                            if wb_database and wb_schema and wb_table_name:
+                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_to", horizontal=True)
+                                
+                                if st.button("Write Table", key="wb_btn_path_to"):
+                                    try:
+                                        with st.spinner("Writing aggregated paths to Snowflake..."):
+                                            # Filter and convert to Snowpark DataFrame
+                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                            snowpark_df = session.create_dataframe(export_df)
+                                            
+                                            # Write to table based on mode
+                                            if write_mode == "Create or Replace":
+                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            else:
+                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            
+                                            # Get actual row count from written table
+                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                            
+                                            # Success message
+                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                            
+                                    except Exception as e:
+                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                        else:
+                            st.warning("Please select at least one path to export", icon=":material/warning:")
+                    else:
+                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
                 
             else:
                     st.write("") 
@@ -2394,7 +2740,7 @@ with tab1:
         
 
         # Separate block for PATH FROM 
-        elif fromevt.strip("'") != 'Any' and toevt.strip("'")== 'Any':
+        elif pattern_mode == "FROM/TO" and fromevt.strip("'") != 'Any' and toevt.strip("'")== 'Any':
 
             path_frm_agg=None
             path_frm_agg_sql=None
@@ -2404,7 +2750,7 @@ with tab1:
             if unitoftime==None and timeout ==None :
                 
                 if use_lookback:
-                    # Look-forward window approach for PATH FROM (from specific event forward in time)
+                    # Look-forward window approach for PATH FROM (captures events AFTER the starting event)
                     path_frm_agg_sql = f"""
                     select path, count(*) as count,array_agg({uid}) as uid_list from (
                         select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
@@ -2507,11 +2853,29 @@ with tab1:
                 if not res.empty:
                     displayed_paths = len(res)
                     if total_paths <= topn:
-                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
-                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                    st.markdown("""
+                    <div class="custom-container-1">
+                        <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                            No paths found matching the specified criteria
+                        </h5>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Create two columns for layout
                 col1, col2 = st.columns([2, 7])
@@ -2650,7 +3014,7 @@ with tab1:
                                 clicked_source = sortedEventList[source_index]
                                 clicked_target = sortedEventList[target_index]
                                 st.caption(f"Selected Edge: {clicked_source.split('_', 1)[1]} → {clicked_target.split('_', 1)[1]}")
-                                valuePair = f"{clicked_source}+{clicked_target}"
+                                valuePair = f"{clicked_source}|||{clicked_target}"
                                 extracted_uids = sankeyLinks.get(valuePair, {}).get("uids", [])
                                 #st.write(f"👤 Extracted UIDs: {extracted_uids}")
                                 flattened_uids = set()
@@ -2835,96 +3199,96 @@ with tab1:
             if st.toggle("View SQL for Aggregated Paths"):     
                     st.code(path_frm_agg_sql, language='sql')
 
-            if st.toggle("View Detailed Individual Paths"):
-            # Individual Paths SQL
-                if unitoftime==None and timeout ==None :
-                    
-                    if use_lookback:
-                        # Look-forward window approach for PATH FROM detailed paths
-                        path_frm_det_sql = f"""
-                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                        from (
-                            WITH FROM_EVENT_TIMES AS (
-                                SELECT {uid}, {tmstp}, {evt},
-                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
-                                FROM {database}.{schema}.{tbl} 
-                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
-                            ),
-                            TIME_WINDOWED AS (
-                                SELECT {uid}, {tmstp}, {evt}
-                                FROM FROM_EVENT_TIMES
-                                WHERE from_event_time IS NOT NULL 
-                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
-                            )
-                            SELECT * FROM TIME_WINDOWED
-                        ) match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A B*) 
-                            define A AS {evt} IN ({fromevt}), B as true
-                        ) {groupby} """
+            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_from", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                    # Use aggregated paths data already computed for visualization
+                    if path_frm_agg is not None and len(path_frm_agg) > 0:
+                        # Convert to DataFrame for easier manipulation
+                        paths_df = pd.DataFrame(path_frm_agg)
+                        
+                        # Path selector
+                        available_paths = paths_df['PATH'].tolist()
+                        
+                        # Select All checkbox
+                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_from")
+                        
+                        # Determine default selection based on checkbox
+                        if select_all:
+                            default_selection = available_paths
+                        else:
+                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
+                        
+                        selected_paths = st.multiselect(
+                            "Choose one or more paths",
+                            options=available_paths,
+                            default=default_selection,
+                            key="wb_path_select_from",
+                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                        )
+                        
+                        if selected_paths:
+                            # Show preview
+                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                            st.info(f"📊 Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                            
+                            # Fetch DBs using cached method
+                            db0 = fetch_databases(session)
+                            
+                            # Database, Schema, Table selection
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_from", placeholder="Choose...")
+                            
+                            wb_schema = None
+                            if wb_database:
+                                schema0 = fetch_schemas(session, wb_database)
+                                
+                                with col2:
+                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_from", placeholder="Choose...")
+                            
+                            with col3:
+                                if wb_database and wb_schema:
+                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_from", placeholder="e.g. path_from_aggregated")
+                                else:
+                                    wb_table_name = None
+                            
+                            # Write mode and button
+                            if wb_database and wb_schema and wb_table_name:
+                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_from", horizontal=True)
+                                
+                                if st.button("Write Table", key="wb_btn_path_from"):
+                                    try:
+                                        with st.spinner("Writing aggregated paths to Snowflake..."):
+                                            # Filter and convert to Snowpark DataFrame
+                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                            snowpark_df = session.create_dataframe(export_df)
+                                            
+                                            # Write to table based on mode
+                                            if write_mode == "Create or Replace":
+                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            else:
+                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            
+                                            # Get actual row count from written table
+                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                            
+                                            # Success message
+                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                            
+                                    except Exception as e:
+                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                        else:
+                            st.warning("Please select at least one path to export", icon=":material/warning:")
                     else:
-                        # Traditional min/max events approach for PATH FROM detailed paths
-                        path_frm_det_sql = f"""
-                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A B{{{minnbbevt},{maxnbbevt}}}) 
-                            define B as true, A AS {evt} IN ({fromevt})
-                        )  {groupby} """
-                    
-                    # Run the SQL
-                    path_frm_det_df = session.sql(path_frm_det_sql).collect()
-                    
-                    # View Individual Paths Output    
-                    st.subheader ('Detailed Individual Paths', divider="grey")
-                    st.dataframe(path_frm_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_frm_det_sql, language='sql')
-                elif unitoftime != None and timeout !=None :
-                    path_frm_det_sql = f"""
-                    select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
-                SELECT *FROM sessions) 
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A B{{{minnbbevt},{maxnbbevt}}}) 
-                        define B as true, A AS {evt} IN ({fromevt})
-                    )  {groupby} """
-                    
-                    # Run the SQL
-                    path_frm_det_df = session.sql(path_frm_det_sql).collect()
-                    
-                    # View Individual Paths Output    
-                    st.subheader ('', divider="grey")
-                    st.dataframe(path_frm_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_frm_det_sql, language='sql')
+                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
                 
             else:
                 st.write("")
                 
         # Separate block for PATH BETWEEN 
-        elif fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any':
+        elif pattern_mode == "FROM/TO" and fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any':
             
             path_betw_agg=None
             path_betw_agg_sql=None
@@ -2934,7 +3298,7 @@ with tab1:
             if unitoftime==None and timeout ==None :
                 
                 if use_lookback:
-                    # Look-forward window approach for PATH BETWEEN (from specific event to specific event within time window)
+                    # Look-forward window approach for PATH BETWEEN (captures events AFTER starting event, up to target event)
                     path_betw_agg_sql = f"""
                     select path, count(*) as count, array_agg({uid}) as uid_list from (
                         select {uid},  listagg({display}, ', ') within group (order by MSQ)  as path
@@ -3036,11 +3400,29 @@ with tab1:
                 if not res.empty:
                     displayed_paths = len(res)
                     if total_paths <= topn:
-                        st.info(f"Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        st.info(f"Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)", icon=":material/info:")
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved from {total_customers:,} customer journeys (top {topn} results)
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
-                    st.info("No paths found matching the specified criteria", icon=":material/info:")
+                    st.markdown("""
+                    <div class="custom-container-1">
+                        <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                            No paths found matching the specified criteria
+                        </h5>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 # Create two columns for layout
                 col1, col2 = st.columns([2, 7])
@@ -3109,7 +3491,7 @@ with tab1:
                                 clicked_source = sortedEventList[source_index]
                                 clicked_target = sortedEventList[target_index]
                                 st.caption(f"Selected Edge: {clicked_source.split('_', 1)[1]} → {clicked_target.split('_', 1)[1]}")
-                                valuePair = f"{clicked_source}+{clicked_target}"
+                                valuePair = f"{clicked_source}|||{clicked_target}"
                                 extracted_uids = sankeyLinks.get(valuePair, {}).get("uids", [])
                                 #st.write(f"👤 Extracted UIDs: {extracted_uids}")
                                 flattened_uids = set()
@@ -3291,90 +3673,90 @@ with tab1:
             if st.toggle("View SQL for Aggregated Paths"):      
                 st.code(path_betw_agg_sql, language='sql')
 
-            if st.toggle("View Detailed Individual Paths"):
-        # Individual Paths SQL
-                if unitoftime==None and timeout ==None :
-                    
-                    if use_lookback:
-                        # Look-forward window approach for PATH BETWEEN detailed paths
-                        path_betw_det_sql = f"""
-                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                        from (
-                            WITH FROM_EVENT_TIMES AS (
-                                SELECT {uid}, {tmstp}, {evt},
-                                       MIN(CASE WHEN {evt} IN ({fromevt}) THEN {tmstp} END) OVER (PARTITION BY {uid}) as from_event_time
-                                FROM {database}.{schema}.{tbl} 
-                                WHERE {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}
-                            ),
-                            TIME_WINDOWED AS (
-                                SELECT {uid}, {tmstp}, {evt}
-                                FROM FROM_EVENT_TIMES
-                                WHERE from_event_time IS NOT NULL 
-                                  AND TIMESTAMPDIFF({gap_unit}, from_event_time, {tmstp}) BETWEEN 0 AND {max_gap_value}
-                            )
-                            SELECT * FROM TIME_WINDOWED
-                        ) match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A X* B) 
-                            define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
-                        ) {groupby} """
+            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_between", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                    # Use aggregated paths data already computed for visualization
+                    if path_betw_agg is not None and len(path_betw_agg) > 0:
+                        # Convert to DataFrame for easier manipulation
+                        paths_df = pd.DataFrame(path_betw_agg)
+                        
+                        # Path selector
+                        available_paths = paths_df['PATH'].tolist()
+                        
+                        # Select All checkbox
+                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_between")
+                        
+                        # Determine default selection based on checkbox
+                        if select_all:
+                            default_selection = available_paths
+                        else:
+                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
+                        
+                        selected_paths = st.multiselect(
+                            "Choose one or more paths",
+                            options=available_paths,
+                            default=default_selection,
+                            key="wb_path_select_between",
+                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                        )
+                        
+                        if selected_paths:
+                            # Show preview
+                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                            st.info(f"📊 Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                            
+                            # Fetch DBs using cached method
+                            db0 = fetch_databases(session)
+                            
+                            # Database, Schema, Table selection
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_between", placeholder="Choose...")
+                            
+                            wb_schema = None
+                            if wb_database:
+                                schema0 = fetch_schemas(session, wb_database)
+                                
+                                with col2:
+                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_between", placeholder="Choose...")
+                            
+                            with col3:
+                                if wb_database and wb_schema:
+                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_between", placeholder="e.g. path_between_aggregated")
+                                else:
+                                    wb_table_name = None
+                            
+                            # Write mode and button
+                            if wb_database and wb_schema and wb_table_name:
+                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_between", horizontal=True)
+                                
+                                if st.button("Write Table", key="wb_btn_path_between"):
+                                    try:
+                                        with st.spinner("Writing aggregated paths to Snowflake..."):
+                                            # Filter and convert to Snowpark DataFrame
+                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                            snowpark_df = session.create_dataframe(export_df)
+                                            
+                                            # Write to table based on mode
+                                            if write_mode == "Create or Replace":
+                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            else:
+                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                            
+                                            # Get actual row count from written table
+                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                            
+                                            # Success message
+                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                            
+                                    except Exception as e:
+                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                        else:
+                            st.warning("Please select at least one path to export", icon=":material/warning:")
                     else:
-                        # Traditional min/max events approach for PATH BETWEEN detailed paths
-                        path_betw_det_sql = f"""
-                        select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                        from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                            match_recognize(
-                            {partitionby} 
-                            order by {tmstp} 
-                            measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                            all rows per match
-                            AFTER MATCH SKIP {overlap}
-                            pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
-                            define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
-                        )  {groupby} """
-                    
-                    # Run the SQL
-                    path_betw_det_df = session.sql(path_betw_det_sql).collect()
-                    
-                    # View Individual Paths Output    
-                    st.subheader ('Detailed Individual Paths', divider="grey")
-                    st.dataframe(path_betw_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_betw_det_sql, language='sql')
-                elif unitoftime != None and timeout !=None :
-                    path_betw_det_sql = f"""
-                    select {uid}, listagg({display}, ',') within group (order by MSQ) as path
-                    from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
-                    {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
-                ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
-                SELECT *FROM sessions) 
-                        match_recognize(
-                        {partitionby} 
-                        order by {tmstp} 
-                        measures match_number() as MATCH_NUMBER, match_sequence_number() as msq, classifier() as cl 
-                        all rows per match
-                        AFTER MATCH SKIP {overlap}
-                        pattern(A X{{{minnbbevt},{maxnbbevt}}} B) 
-                        define  A AS {evt} IN ({fromevt}), X as true, B AS {evt} IN ({toevt})
-                    )  {groupby} """
-                    
-                    # Run the SQL
-                    path_betw_det_df = session.sql(path_betw_det_sql).collect()
-                    
-                    # View Individual Paths Output    
-                    st.subheader ('Detailed Individual Paths', divider="grey")
-                    st.dataframe(path_betw_det_df, use_container_width=True)
-        
-                    # View Individual Paths SQL
-                    with st.expander("View SQL for Individual Paths"):    
-                        st.code(path_betw_det_sql, language='sql')
+                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
                 
             else:
                 st.write("")
@@ -3515,7 +3897,7 @@ with tab1:
                                 clicked_source = sortedEventList[source_index]
                                 clicked_target = sortedEventList[target_index]
                                 st.caption(f"Selected Edge: {clicked_source.split('_', 1)[1]} → {clicked_target.split('_', 1)[1]}")
-                                valuePair = f"{clicked_source}+{clicked_target}"
+                                valuePair = f"{clicked_source}|||{clicked_target}"
                                 extracted_uids = sankeyLinks.get(valuePair, {}).get("uids", [])
                                 #st.write(f"👤 Extracted UIDs: {extracted_uids}")
                                 flattened_uids = set()
@@ -3625,20 +4007,8 @@ with tab1:
             st.write("Please select appropriate options for 'from' and 'to'")
     else:
         st.markdown("""
-    <style>
-    .custom-container-1 {
-        padding: 10px 10px 10px 10px;
-        border-radius: 10px;
-        background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
-        border: none;  /* Blue border */
-        margin-bottom: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-        st.markdown("""
     <div class="custom-container-1">
-        <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+        <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
             Please ensure all required inputs are selected before running the app.
         </h5>
     </div>
@@ -5164,20 +5534,8 @@ with tab2:
                 st.write("Please select appropriate options for 'from' and 'to'")
         else:
             st.markdown("""
-            <style>
-            .custom-container-1 {
-                padding: 10px 10px 10px 10px;
-                border-radius: 10px;
-                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
-                border: none;  /* Blue border */
-                margin-bottom: 20px;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-        
-            st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+                <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
                     Please ensure all required inputs are selected before running the app. Valid patterns for comparison are 'path to' (FROM= Any) and 'path from' (TO = Any)
                 </h5>
             </div>
@@ -5908,20 +6266,8 @@ with tab2:
                 st.write("Please select appropriate options for 'from' and 'to'")
         else:
             st.markdown("""
-            <style>
-            .custom-container-1 {
-                padding: 10px 10px 10px 10px;
-                border-radius: 10px;
-                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
-                border: none;  /* Blue border */
-                margin-bottom: 20px;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-        
-            st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+                <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
                     Please ensure all required inputs are selected before running the app. Valid patterns for comparison are 'path to' (FROM= Any) and 'path from' (TO = Any)
                 </h5>
             </div>
