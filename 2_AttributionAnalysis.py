@@ -27,6 +27,237 @@ import ast
 # Call function to create new or get existing Snowpark session to connect to Snowflake
 session = get_active_session()
 
+# Dark mode compatible styling
+st.markdown("""
+        <style>
+/* Override Streamlit theme variables for rounded corners */
+:root {
+    --baseRadius: 10px !important;
+}
+
+.stApp {
+    --baseRadius: 10px !important;
+}
+
+/* Force rounded corners on all alert/message elements */
+* {
+    --baseRadius: 10px !important;
+}
+
+/* Block container styling */
+               .block-container {
+                    padding-top: 1rem;
+                    padding-bottom: 1rem;
+                    padding-left: 2rem;
+                    padding-right: 2rem;
+                }
+
+/* Subtle spacing adjustment for message elements */
+div[data-testid="stAlert"],
+div[data-testid="stInfo"], 
+div[data-testid="stWarning"],
+div[data-testid="stError"],
+div[data-testid="stSuccess"] {
+    margin-bottom: 0.5rem !important;
+}
+
+.custom-container-1 {
+    background-color: #f0f2f6 !important;
+    padding: 10px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+.custom-container-1 h5 {
+    color: #0f0f0f !important;
+}
+
+/* Custom styling for all message types - aggressive rounded corners and tight margins */
+.stAlert,
+.stAlert *,
+.stAlert[data-baseweb="notification"],
+.stAlert[data-baseweb="notification"] *,
+div[data-testid="stAlert"],
+div[data-testid="stAlert"] *,
+div[data-testid="stInfo"],
+div[data-testid="stInfo"] *,
+div[data-testid="stWarning"],
+div[data-testid="stWarning"] *,
+div[data-testid="stError"],
+div[data-testid="stError"] *,
+div[data-testid="stSuccess"],
+div[data-testid="stSuccess"] * {
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+    -webkit-border-radius: 10px !important;
+    -moz-border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"] {
+    background-color: #f0f2f6 !important;
+    border: none !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"] > div {
+    background-color: #f0f2f6 !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Warning messages - orange/yellow tint */
+.stAlert[data-baseweb="notification"][data-testid="stWarning"] {
+    background-color: #fff3cd !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
+    background-color: #fff3cd !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Error messages - red tint */
+.stAlert[data-baseweb="notification"][data-testid="stError"] {
+    background-color: #f8d7da !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stError"] > div {
+    background-color: #f8d7da !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Success messages - green tint */
+.stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
+    background-color: #d1f2eb !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+.stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
+    background-color: #d1f2eb !important;
+    --baseRadius: 10px !important;
+    baseRadius: 10px !important;
+    border-radius: 10px !important;
+}
+
+/* Remove default icons and customize */
+.stAlert .stAlert-content::before {
+    content: none !important;
+}
+
+/* Hide all default icons with multiple selectors */
+.stAlert svg,
+.stSuccess svg,
+.stInfo svg,
+div[data-testid="stAlert"] svg,
+div[data-testid="stSuccess"] svg,
+div[data-testid="stInfo"] svg,
+.stAlert .stIcon,
+.stSuccess .stIcon,
+.stInfo .stIcon,
+.stAlert::before,
+.stSuccess::before,
+.stInfo::before,
+div[data-testid="stAlert"]::before,
+div[data-testid="stSuccess"]::before,
+div[data-testid="stInfo"]::before {
+    display: none !important;
+    visibility: hidden !important;
+    content: "" !important;
+}
+
+
+@media (prefers-color-scheme: dark) {
+    .custom-container-1 {
+        background-color: transparent !important;
+        border: 1px solid #4a4a4a !important;
+    }
+    
+    .custom-container-1 h5 {
+        color: #ffffff !important;
+    }
+    
+    /* Custom styling for all message types in dark mode */
+    .stAlert[data-baseweb="notification"] {
+        background-color: transparent !important;
+        border: 1px solid #4a4a4a !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Warning messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stWarning"] {
+        background-color: transparent !important;
+        border: 1px solid #ffc107 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Error messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stError"] {
+        background-color: transparent !important;
+        border: 1px solid #dc3545 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stError"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    /* Success messages in dark mode */
+    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
+        background-color: transparent !important;
+        border: 1px solid #28a745 !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+    
+    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
+        background-color: transparent !important;
+        --baseRadius: 10px !important;
+        baseRadius: 10px !important;
+        border-radius: 10px !important;
+    }
+                }
+        </style>
+        """, unsafe_allow_html=True)
+
 #===================================================================================
 # STORED PROCEDURE CREATION FUNCTIONS (Server-Side Optimization)
 #===================================================================================
@@ -678,262 +909,10 @@ sess1=""
 model = None
 cols=''
 colsdf = pd.DataFrame()
-st.markdown("""
-<style>
-.custom-container-1 {
-    padding: 10px 10px 10px 10px;
-    border-radius: 10px;
-    background-color: #f0f2f6 !important;  /* Light blue background */
-    border: none;  /* No border in light mode */
-    margin-bottom: 20px;
-    transition: all 0.3s ease;
-}
-
-/* Custom styling for all message types - aggressive rounded corners and tight margins */
-.stAlert,
-.stAlert *,
-.stAlert[data-baseweb="notification"],
-.stAlert[data-baseweb="notification"] *,
-div[data-testid="stAlert"],
-div[data-testid="stAlert"] *,
-div[data-testid="stInfo"],
-div[data-testid="stInfo"] *,
-div[data-testid="stWarning"],
-div[data-testid="stWarning"] *,
-div[data-testid="stError"],
-div[data-testid="stError"] *,
-div[data-testid="stSuccess"],
-div[data-testid="stSuccess"] * {
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-    -webkit-border-radius: 10px !important;
-    -moz-border-radius: 10px !important;
-}
-
-.stAlert[data-baseweb="notification"] {
-    background-color: #f0f2f6 !important;
-    border: none !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-.stAlert[data-baseweb="notification"] > div {
-    background-color: #f0f2f6 !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-/* Warning messages - orange/yellow tint */
-.stAlert[data-baseweb="notification"][data-testid="stWarning"] {
-    background-color: #fff3cd !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-.stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
-    background-color: #fff3cd !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-/* Error messages - red tint */
-.stAlert[data-baseweb="notification"][data-testid="stError"] {
-    background-color: #f8d7da !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-.stAlert[data-baseweb="notification"][data-testid="stError"] > div {
-    background-color: #f8d7da !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-/* Success messages - green tint */
-.stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
-    background-color: #d1f2eb !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-.stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
-    background-color: #d1f2eb !important;
-    --baseRadius: 10px !important;
-    baseRadius: 10px !important;
-    border-radius: 10px !important;
-}
-
-/* Remove default icons and customize */
-.stAlert .stAlert-content::before {
-    content: none !important;
-}
-
-/* Hide all default icons with multiple selectors */
-.stAlert svg,
-.stSuccess svg,
-.stInfo svg,
-div[data-testid="stAlert"] svg,
-div[data-testid="stSuccess"] svg,
-div[data-testid="stInfo"] svg,
-.stAlert .stIcon,
-.stSuccess .stIcon,
-.stInfo .stIcon,
-.stAlert::before,
-.stSuccess::before,
-.stInfo::before,
-div[data-testid="stAlert"]::before,
-div[data-testid="stSuccess"]::before,
-div[data-testid="stInfo"]::before {
-    display: none !important;
-    visibility: hidden !important;
-    content: "" !important;
-}
-
-/* Override Streamlit's default alert styling more aggressively */
-div[data-testid="stAlert"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-}
-
-div[data-testid="stAlert"] > div {
-    padding: 0 !important;
-    margin: 0 !important;
-}
-
-/* Target all text content inside alerts */
-.stAlert p,
-.stAlert div,
-.stAlert span,
-div[data-testid="stAlert"] p,
-div[data-testid="stAlert"] div,
-div[data-testid="stAlert"] span {
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* More specific targeting for alert types */
-div[data-testid="stSuccess"],
-div[data-testid="stInfo"],
-div[data-testid="stWarning"],
-div[data-testid="stError"] {
-    padding: 10px 14px !important;
-    line-height: 1.5 !important;
-    font-size: 14px !important;
-    border-radius: 10px !important;
-}
-
-/* Dark mode support for Attribution Analysis */
-@media (prefers-color-scheme: dark) {
-    .custom-container-1 {
-        background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
-    }
-    
-    .custom-container-1 h5 {
-        color: #29B5E8 !important;
-    }
-    
-    /* Custom styling for all message types in dark mode - Match Behavioral Segmentation */
-    .stAlert[data-baseweb="notification"] {
-        background-color: transparent !important;
-        border: 1px solid #29B5E8 !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    .stAlert[data-baseweb="notification"] > div {
-        background-color: transparent !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    /* Warning messages in dark mode */
-    .stAlert[data-baseweb="notification"][data-testid="stWarning"] {
-        background-color: transparent !important;
-        border: 1px solid #ffc107 !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    .stAlert[data-baseweb="notification"][data-testid="stWarning"] > div {
-        background-color: transparent !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    /* Error messages in dark mode */
-    .stAlert[data-baseweb="notification"][data-testid="stError"] {
-        background-color: transparent !important;
-        border: 1px solid #dc3545 !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    .stAlert[data-baseweb="notification"][data-testid="stError"] > div {
-        background-color: transparent !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    /* Success messages in dark mode */
-    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] {
-        background-color: transparent !important;
-        border: 1px solid #28a745 !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-    
-    .stAlert[data-baseweb="notification"][data-testid="stSuccess"] > div {
-        background-color: transparent !important;
-        --baseRadius: 10px !important;
-        baseRadius: 10px !important;
-        border-radius: 10px !important;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-    <style>
-    /* Fix for st.container(border=True) */
-    div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        border: 1px solid #d1d5db !important;
-        border-radius: 8px !important;
-        padding: 16px !important;
-        margin: 8px 0 !important;
-    }
-
-    /* Dark mode support for bordered containers */
-    @media (prefers-color-scheme: dark) {
-        div[data-testid="stVerticalBlock"] > div[style*="border"] {
-            border: 1px solid #29B5E8 !important;
-            background-color: transparent !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="custom-container-1">
-    <h5 style="font-size: 18px; font-weight: normal; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+    <h5 style="font-size: 18px; font-weight: normal; margin-top: 0px; margin-bottom: -15px;">
         ATTRIBUTION ANALYSIS
     </h5>
 </div>
@@ -1465,7 +1444,7 @@ with st.expander("Input Parameters", icon=":material/settings:"):
 
 **Shapley Value Model:** Game theory approach that fairly distributes credit by calculating each event's marginal contribution across all possible combinations of touchpoints in the customer journey.
 
-**💡 Performance Tip:** For optimal performance when running Markov Chain or Shapley Value models, use a Snowpark-optimized warehouse to leverage enhanced computational capabilities for complex probabilistic calculations.""")
+**Performance Tip:** For optimal performance when running Markov Chain or Shapley Value models, use a Snowpark-optimized warehouse to leverage enhanced computational capabilities for complex probabilistic calculations.""")
                     st.write("")  # Add small space
                     model = st.pills(
                          "Select Model",
@@ -4189,20 +4168,8 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     
     else:
         st.markdown("""
-            <style>
-            .custom-container-1 {
-                padding: 10px 10px 10px 10px;
-                border-radius: 10px;
-                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
-                border: none;  /* Blue border */
-                margin-bottom: 20px;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
+                <h5 style="font-size: 14px; font-weight: 200 ; margin-top: 0px; margin-bottom: -15px;">
                     Please select one or more modeling technique
                 </h5>
             </div>
@@ -4211,21 +4178,9 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
         
 else:   
         st.markdown("""
-            <style>
-            .custom-container-1 {
-                padding: 10px 10px 10px 10px;
-                border-radius: 10px;
-                background-color: #f0f2f6 !important;  /* Light blue background f0f8ff */
-                border: none;  /* Blue border */
-                margin-bottom: 20px;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("""
             <div class="custom-container-1">
-                <h5 style="font-size: 14px; font-weight: 200 ; color: #0f0f0f; margin-top: 0px; margin-bottom: -15px;">
-                    Please ensure all required inputs are selected before running the app. 💡 Performance Tip: For optimal performance when running Markov Chain or Shapley Value models, use a Snowpark-optimized warehouse to leverage enhanced computational capabilities for complex probabilistic calculations.
+                <h5 style="font-size: 14px; font-weight: 200 ; margin-top: 0px; margin-bottom: -15px;">
+                    Please ensure all required inputs are selected before running the app. Performance Tip: For optimal performance when running Markov Chain or Shapley Value models, use a Snowpark-optimized warehouse to leverage enhanced computational capabilities for complex probabilistic calculations.
                 </h5>
             </div>
             """, unsafe_allow_html=True)
