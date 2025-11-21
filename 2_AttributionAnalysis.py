@@ -2624,7 +2624,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
                     # User selection for Time To Conversion Unit
                 st.write("")
-            timetoconversionunit = st.radio(
+                timetoconversionunit = st.radio(
                 "Time To Conversion Unit",
                 ["Sec", "Min", "Hour", "Day"],
                 horizontal=True,
@@ -3654,6 +3654,16 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             with st.container(border=True):
                 st.plotly_chart(fig, use_container_width=True)
 
+            # User selection for Time To Conversion Unit
+            st.write("")
+            timetoconversionunit = st.radio(
+                "Time To Conversion Unit",
+                ["Sec", "Min", "Hour", "Day"],
+                horizontal=True,
+                key='timetoconv_rulebased_shapley',
+                help="Select the most appropriate time unit to display the Time To Conversion value in the bubble charts"
+            )
+
             # Bubble Charts section
             # Set up color mapping for events (needed for bubble chart)
             # Ensure events_color_map exists in session state
@@ -3664,7 +3674,8 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     st.session_state['events_color_map'][event] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
             
             dfattrib['color'] = dfattrib[evt].map(st.session_state['events_color_map'])
-            y_col = "Time To Conversion (Day)"  # Default time column
+            # Define y-axis column dynamically based on selected time unit
+            y_col = f"Time To Conversion ({timetoconversionunit})"
             def create_bubble_chart(x_col, y_col, title, color_map=None):
                 # Define model colors matching the bar chart (for TITLES only)
                 model_title_colors = {
@@ -4001,6 +4012,16 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             with st.container(border=True):
              st.plotly_chart(fig, use_container_width=True)
 
+            # User selection for Time To Conversion Unit
+            st.write("")
+            timetoconversionunit = st.radio(
+                "Time To Conversion Unit",
+                ["Sec", "Min", "Hour", "Day"],
+                horizontal=True,
+                key='timetoconv_all_models',
+                help="Select the most appropriate time unit to display the Time To Conversion value in the bubble charts"
+            )
+
             # Bubble Charts section
             # Set up color mapping for events (needed for bubble chart)
             # Ensure events_color_map exists in session state
@@ -4011,7 +4032,8 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     st.session_state['events_color_map'][event] = "#" + ''.join([random.choice('0123456789ABCDEF') for _ in range(6)])
             
             dfattrib['color'] = dfattrib[evt].map(st.session_state['events_color_map'])
-            y_col = "Time To Conversion (Day)"  # Default time column
+            # Define y-axis column dynamically based on selected time unit
+            y_col = f"Time To Conversion ({timetoconversionunit})"
             def create_bubble_chart(x_col, y_col, title, color_map=None):
                 # Define model colors matching the bar chart (for TITLES only)
                 model_title_colors = {
