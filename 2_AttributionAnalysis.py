@@ -1065,7 +1065,7 @@ with st.expander("Input Parameters", icon=":material/settings:"):
                 
                 with st.container():
                     st.markdown("""<h2 style='font-size: 14px; margin-bottom: 0px; margin-top: 15px;'>Conversion Condition (Optional)</h2>
-                    <hr style='margin-top: -8px;margin-bottom: 5px;'>""", unsafe_allow_html=True, help="Add an additional condition that must be met for an event to be considered a conversion")
+                    <hr style='margin-top: -8px;margin-bottom: 5px;'>""", unsafe_allow_html=True, help="Add an additional condition that must be met for an event to be considered a conversion. Note: Markov Chain models will be unavailable when this option is enabled.")
                     
                     col_toggle, col_empty = st.columns([2, 3])
                     with col_toggle:
@@ -1446,9 +1446,21 @@ with st.expander("Input Parameters", icon=":material/settings:"):
 
 **Performance Tip:** For optimal performance when running Markov Chain or Shapley Value models, use a Snowpark-optimized warehouse to leverage enhanced computational capabilities for complex probabilistic calculations.""")
                     st.write("")  # Add small space
+                    
+                    # Check if additional conversion condition is enabled
+                    # If so, Markov Chain cannot work properly (Markov model doesn't account for the extra condition)
+                    markov_disabled = enable_conv_condition
+                    
+                    # Filter model options based on whether Markov is disabled
+                    if markov_disabled:
+                        available_models = ["Rule Based", "Shapley Value", "Rule Based & Shapley Value"]
+                        st.info("Markov Chain model is unavailable when 'Add condition to conversion' is enabled. The Markov model analyzes event transitions without considering additional conversion conditions, which would lead to inaccurate attribution results.", icon=":material/info:")
+                    else:
+                        available_models = ["Rule Based", "Markov Chain", "Shapley Value", "Rule Based & Markov Chain", "Rule Based & Shapley Value", "All Models"]
+                    
                     model = st.pills(
                          "Select Model",
-                         ["Rule Based", "Markov Chain", "Shapley Value", "Rule Based & Markov Chain", "Rule Based & Shapley Value", "All Models"],
+                         available_models,
                          key='modeltech',
                          label_visibility="collapsed"
                      )
@@ -1457,7 +1469,7 @@ with st.expander("Input Parameters", icon=":material/settings:"):
                     with col1:                     
                      # Add Shapley Value configuration options
                      if model and 'Shapley' in model:
-                         with st.expander("⚙️ Shapley Value Configuration"):
+                         with st.expander("Shapley Value Configuration"):
                              shapley_samples = st.number_input(
                                  "Monte Carlo Samples",
                                  min_value=100,
@@ -2431,11 +2443,11 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             
             dfattrib = pd.DataFrame(attribution)
             markov_df = pd.DataFrame.from_dict(mcmodel['markov_conversions'], orient='index', columns=['Markov Conversions'])
-            markov_df.index.name = conv
+            markov_df.index.name = evt  # Use evt (event column) not conv (conversion column)
             markov_df.reset_index(inplace=True)
             
             # Merge Markov results
-            dfattrib = dfattrib.merge(markov_df, on=conv, how='left')
+            dfattrib = dfattrib.merge(markov_df, on=evt, how='left')  # Merge on evt column
             desired_position = 6
             column_to_move = dfattrib.pop('Markov Conversions')
             dfattrib.insert(desired_position, 'Markov Conversions', column_to_move)
@@ -2577,10 +2589,10 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             # Update layout
             fig2.update_layout(
                 title={
-                    'text': "<span style='font-size:12px;'>Event</span>",
+                    'text': f"<span style='font-size:12px;'>{evt}</span>",
                     'font': {
                         'size': 16,
-                        'color': 'black',
+                        'color': 'var(--text-color)',
                         'family': 'Arial'
                     },
                     'x': 0.5  # Center the title
@@ -2814,8 +2826,8 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             with st.spinner("Computing Markov Chain attribution model... This may take a few moments."):
                 mcmodel = markovchain()
                 markov_df = pd.DataFrame.from_dict(mcmodel['markov_conversions'], orient='index', columns=['Markov Conversions'])
-                markov_df.index.name = conv  # Set index name to match the key in dfattrib
-                markov_df.reset_index(inplace=True)  # Reset index to make conversion column a column
+                markov_df.index.name = evt  # Set index name to match the event column
+                markov_df.reset_index(inplace=True)  # Reset index to make event column a column
                 st.session_state['markov_df'] = markov_df
         
         # Display results if they exist in session state
@@ -3164,10 +3176,10 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             # Update layout
             fig.update_layout(
                 title={
-                    'text': "",
+                    'text': f"<span style='font-size:12px;'>{evt}</span>",
                     'font': {
                         'size': 16,
-                        'color': 'black',
+                        'color': 'var(--text-color)',
                         'family': 'Arial'
                     },
                     'x': 0.5  # Center the title
@@ -3318,7 +3330,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             with st.spinner("Computing Shapley value attribution... This may take a few moments."):
                 shapley_results = shapley_attribution()
                 shapley_df = pd.DataFrame.from_dict(shapley_results, orient='index', columns=['Shapley Values'])
-                shapley_df.index.name = conv
+                shapley_df.index.name = evt  # Set index name to match the event column
                 shapley_df.reset_index(inplace=True)
                 st.session_state['shapley_df'] = shapley_df
         
@@ -3491,14 +3503,14 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             
             dfattrib = pd.DataFrame(attribution)
             shapley_df = pd.DataFrame.from_dict(shapley_results, orient='index', columns=['Shapley Values'])
-            shapley_df.index.name = conv
+            shapley_df.index.name = evt  # Use evt (event column) not conv (conversion column)
             shapley_df.reset_index(inplace=True)
             
             # Ensure Shapley Values column is numeric
             shapley_df['Shapley Values'] = pd.to_numeric(shapley_df['Shapley Values'], errors='coerce').fillna(0)
             
             # Merge Shapley results
-            dfattrib = dfattrib.merge(shapley_df, on=conv, how='left')
+            dfattrib = dfattrib.merge(shapley_df, on=evt, how='left')  # Merge on evt column
             desired_position = 6
             column_to_move = dfattrib.pop('Shapley Values')
             dfattrib.insert(desired_position, 'Shapley Values', column_to_move)
@@ -3630,6 +3642,14 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     ))
             
             fig.update_layout(
+                title={
+                    'text': f"<span style='font-size:12px;'>{evt}</span>",
+                    'font': {
+                        'size': 16,
+                        'family': 'Arial'
+                    },
+                    'x': 0.5  # Center the title
+                },
                 xaxis=dict(
                     title="",
                     tickangle=45,  # Rotate x-axis labels for better readability
@@ -3835,19 +3855,19 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             
             # Add Markov results
             markov_df = pd.DataFrame.from_dict(mcmodel['markov_conversions'], orient='index', columns=['Markov Conversions'])
-            markov_df.index.name = conv
+            markov_df.index.name = evt  # Use evt (event column) not conv (conversion column)
             markov_df.reset_index(inplace=True)
-            dfattrib = dfattrib.merge(markov_df, on=conv, how='left')
+            dfattrib = dfattrib.merge(markov_df, on=evt, how='left')  # Merge on evt column
             
             # Add Shapley results
             shapley_df = pd.DataFrame.from_dict(shapley_results, orient='index', columns=['Shapley Values'])
-            shapley_df.index.name = conv
+            shapley_df.index.name = evt  # Use evt (event column) not conv (conversion column)
             shapley_df.reset_index(inplace=True)
             
             # Ensure Shapley Values column is numeric
             shapley_df['Shapley Values'] = pd.to_numeric(shapley_df['Shapley Values'], errors='coerce').fillna(0)
             
-            dfattrib = dfattrib.merge(shapley_df, on=conv, how='left')
+            dfattrib = dfattrib.merge(shapley_df, on=evt, how='left')  # Merge on evt column
             
             # Reorder columns
             desired_position = 6
@@ -3984,6 +4004,14 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     ))
             
             fig.update_layout(
+                title={
+                    'text': f"<span style='font-size:12px;'>{evt}</span>",
+                    'font': {
+                        'size': 16,
+                        'family': 'Arial'
+                    },
+                    'x': 0.5  # Center the title
+                },
                 xaxis=dict(
                     title="",
                     tickangle=45,  # Rotate x-axis labels for better readability
