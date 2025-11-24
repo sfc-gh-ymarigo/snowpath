@@ -1531,9 +1531,13 @@ if run_button and all([database, schema, table, uid, evt, tmstp]):
         del st.session_state['behavioral_results']
     
     with st.spinner("Running behavioral segmentation analysis..."):
-        tab1, tab2 = st.tabs(["Analysis Process", "Results"])
+        # Initialize active tab in session state if not exists
+        if 'behavioral_active_tab' not in st.session_state:
+            st.session_state['behavioral_active_tab'] = 'Results'
         
-        with tab1:
+        tab1, tab2 = st.tabs(["Results", "Analysis Process"])
+        
+        with tab2:
             # Run all analysis steps here
             
             # Step 1: Create Event Sequences
@@ -2613,7 +2617,7 @@ if run_button and all([database, schema, table, uid, evt, tmstp]):
             # Set flag to suppress stale parameter warning on next rerun
             st.session_state['just_ran_clustering'] = True
         
-        with tab2:
+        with tab1:
             # Render results from session state (persistent across reruns)
             if 'behavioral_results' in st.session_state and st.session_state['behavioral_results'].get('completed'):
                 
@@ -2989,7 +2993,15 @@ if run_button and all([database, schema, table, uid, evt, tmstp]):
                     """, unsafe_allow_html=True)
                 # Add option to show all events vs top events
 
-                show_all_events = st.checkbox("Show All Events", value=False, help="Uncheck to show only top 5 events per cluster")
+                # Use session state to persist checkbox value across reruns
+                if 'show_all_events_behavioral' not in st.session_state:
+                    st.session_state['show_all_events_behavioral'] = False
+                
+                show_all_events = st.checkbox("Show All Events", 
+                                             value=st.session_state['show_all_events_behavioral'],
+                                             key="show_all_events_live",
+                                             help="Uncheck to show only top 5 events per cluster",
+                                             on_change=lambda: st.session_state.update({'show_all_events_behavioral': st.session_state['show_all_events_live']}))
                 
                 try:
                     # Create multi-level treemap using Plotly Express path approach
@@ -3203,10 +3215,19 @@ if run_button and all([database, schema, table, uid, evt, tmstp]):
                             key="cluster_interpretation_model_tab1"
                         )
                         
+                        # Use session state to persist toggle value across reruns
+                        if 'interpret_clusters_behavioral' not in st.session_state:
+                            st.session_state['interpret_clusters_behavioral'] = False
+                        
                         interpret_clusters = st.toggle(
                             "Interpret Clusters", 
-                            key="interpret_clusters_toggle_tab1"
+                            value=st.session_state['interpret_clusters_behavioral'],
+                            key="interpret_clusters_toggle_live"
                         )
+                        
+                        # Update session state when toggle changes
+                        if interpret_clusters != st.session_state['interpret_clusters_behavioral']:
+                            st.session_state['interpret_clusters_behavioral'] = interpret_clusters
                     # with col2 & col3: (left empty for alignment with other sections)
                     
                     if interpret_clusters:
@@ -3295,20 +3316,26 @@ if run_button and all([database, schema, table, uid, evt, tmstp]):
 
 # Show cached results when not running new clustering
 if not run_button and has_cached_results and all([database, schema, table, uid, evt, tmstp]):
-    # Show tabs with cached results
-    tab1, tab2 = st.tabs(["Analysis Process", "Results"])
+    # Show tabs with cached results (Results first for better UX)
+    tab1, tab2 = st.tabs(["Results", "Analysis Process"])
+    
+    with tab2:
+        # Show simple status message in Analysis Process tab
+        st.success("Analysis completed successfully!")
+        st.info("This tab shows the step-by-step analysis process. Switch to the Results tab to view detailed clustering results.")
+        
     
     with tab1:
-        # Check if parameters have changed since last analysis
+        # Check if parameters have changed since last analysis (show at top of Results tab)
         try:
             params_changed, changed_param_list = parameters_changed()
             
             if params_changed:
                 # Merged message: parameters changed warning with call to action
-                st.warning("**Parameters Changed** - Click 'Run Clustering Analysis' button above to update results with current parameters", icon=":material/warning:")
+                st.warning("**Parameters Changed** - Click 'Run Clustering Analysis' button above to update results with current parameters")
                 
                 # Show what changed
-                with st.expander("See What Changed", expanded=False,icon=":material/visibility:"):
+                with st.expander("See What Changed", expanded=False):
                     st.markdown("Changed parameters since last analysis:")
                     for param in changed_param_list:
                         # Make parameter names more user-friendly
@@ -3335,19 +3362,12 @@ if not run_button and has_cached_results and all([database, schema, table, uid, 
                         }
                         friendly_name = friendly_names.get(param, param.replace('_', ' ').title())
                         st.markdown(f"• {friendly_name}")
-                
-            else:
-                # Parameters haven't changed - show normal success
-                st.success("Analysis Up-to-Date - Results match current parameters", icon=":material/check:")
-                st.info("Change any parameters above and click 'Run Clustering Analysis' button to re-run with new settings", icon=":material/lightbulb:")
-                
+                st.write("")  # Add spacing after warning
+            
         except Exception as e:
-            # Fallback to original message if comparison fails
-            st.success("Analysis completed! Results are cached and available in the Results tab.", icon=":material/check:")
-            st.info("Tip: Change any parameters above to re-run the analysis with new settings.", icon=":material/lightbulb:")
+            # Silently pass if comparison fails - don't block results display
+            pass
         
-    
-    with tab2:
         # Display cached results (same code as in the main analysis block)
         if 'behavioral_results' in st.session_state and st.session_state['behavioral_results'].get('completed'):
             
@@ -3743,7 +3763,15 @@ if not run_button and has_cached_results and all([database, schema, table, uid, 
                 """, unsafe_allow_html=True)
             # Add option to show all events vs top events (cached results)
             
-            show_all_events_cached = st.checkbox("Show All Events", value=False, key="show_all_events_cached", help="Uncheck to show only top 5 events per cluster")
+            # Use same session state as the live version for consistency
+            if 'show_all_events_behavioral' not in st.session_state:
+                st.session_state['show_all_events_behavioral'] = False
+            
+            show_all_events_cached = st.checkbox("Show All Events", 
+                                                value=st.session_state['show_all_events_behavioral'],
+                                                key="show_all_events_cached",
+                                                help="Uncheck to show only top 5 events per cluster",
+                                                on_change=lambda: st.session_state.update({'show_all_events_behavioral': st.session_state['show_all_events_cached']}))
             
             try:
                 # Create multi-level treemap using Plotly Express path approach (cached results)
@@ -3956,10 +3984,19 @@ if not run_button and has_cached_results and all([database, schema, table, uid, 
                         key="cluster_interpretation_model_tab1"
                     )
                     
+                    # Use same session state as the live version for consistency
+                    if 'interpret_clusters_behavioral' not in st.session_state:
+                        st.session_state['interpret_clusters_behavioral'] = False
+                    
                     interpret_clusters = st.toggle(
                         "Interpret Clusters", 
-                        key="interpret_clusters_toggle_tab1"
+                        value=st.session_state['interpret_clusters_behavioral'],
+                        key="interpret_clusters_toggle_cached"
                     )
+                    
+                    # Update session state when toggle changes
+                    if interpret_clusters != st.session_state['interpret_clusters_behavioral']:
+                        st.session_state['interpret_clusters_behavioral'] = interpret_clusters
                 # with col2 & col3: (left empty for alignment with other sections)
                 
                 if interpret_clusters:
