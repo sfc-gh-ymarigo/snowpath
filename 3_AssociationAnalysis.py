@@ -857,7 +857,7 @@ CNTB AS (
     FROM base_data A
     JOIN base_data B
         ON A.{uid} = B.{uid}
-        AND A.{item} > B.{item}
+        AND A.{item} <> B.{item}
     GROUP BY A.{item}, B.{item}
 ),
 -- Global statistics (from base_data)
