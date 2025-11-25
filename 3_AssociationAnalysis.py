@@ -1167,7 +1167,14 @@ FROM ASSOCIATION_RULES{show_only_where};
                     chart_height = st.number_input("Chart Height (px)", min_value=400, max_value=2000, value=900, step=50,
                                                   help="Adjust the height of the network graph")
                 with col4:
-                    st.write("")
+                    # Add edge direction filter (only show if specific items are selected)
+                    if show_only_items_input:
+                        edge_direction = st.selectbox("Edge Direction", 
+                                                     ["Both", "Outbound Only", "Inbound Only"],
+                                                     help="Filter edges by direction:\n• Outbound: Selected items as ANTECEDENT (cause)\n• Inbound: Selected items as CONSEQUENT (effect)\n• Both: Show all edges")
+                    else:
+                        edge_direction = "Both"
+                        st.write("")
                 with col5:
                     st.write("")
                 
@@ -1185,6 +1192,17 @@ FROM ASSOCIATION_RULES{show_only_where};
                         st.caption(f"Showing top {filter_percentage}% ({num_rows:,} out of {len(dfasso):,} associations) based on {metric}")
                     else:
                         filtered_dfasso = dfasso
+                    
+                    # Apply edge direction filter if specific items are selected
+                    if show_only_items_input and edge_direction != "Both":
+                        if edge_direction == "Outbound Only":
+                            # Show only edges where selected items are ANTECEDENT
+                            filtered_dfasso = filtered_dfasso[filtered_dfasso['ANTECEDENT'].isin(show_only_items_input)]
+                            st.caption(f"Showing outbound edges: {', '.join(show_only_items_input)} → other items")
+                        elif edge_direction == "Inbound Only":
+                            # Show only edges where selected items are CONSEQUENT
+                            filtered_dfasso = filtered_dfasso[filtered_dfasso['CONSEQUENT'].isin(show_only_items_input)]
+                            st.caption(f"Showing inbound edges: other items → {', '.join(show_only_items_input)}")
                     
                     # Visualize the graph with filtered data
                     sigma_graph(filtered_dfasso, metric, chart_height)
