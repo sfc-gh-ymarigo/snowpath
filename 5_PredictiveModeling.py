@@ -259,7 +259,7 @@ st.markdown("""
                 }
 
 .custom-container-1 {
-    background-color: #f0f2f6 !important;
+    background-color: #f7f7f7 !important;
     padding: 10px;
     border-radius: 5px;
     margin-bottom: 10px;
@@ -277,7 +277,7 @@ st.markdown("""
     }
     
     .custom-container-1 h5 {
-        color: #ffffff !important;
+        color: #b0b0b0 !important;
     }
     
     /* Custom styling for all message types in dark mode */
