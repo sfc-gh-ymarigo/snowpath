@@ -5,7 +5,7 @@ import streamlit as st
 
 # Configure Streamlit theme - GitHub Quickstart Blue
 st.set_page_config(
-    page_title="Snowpath",
+    page_title="Sequent",
     page_icon="❄️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -63,7 +63,7 @@ st.markdown("""
                 .custom-container-1 {
                     padding: 10px 10px 10px 10px;
                     border-radius: 10px;
-                    background-color: #f0f2f6 !important; 
+                    background-color: #f7f7f7 !important; 
                     border: none;
                     margin-bottom: 20px;
                     transition: all 0.3s ease;
@@ -83,7 +83,7 @@ st.markdown("""
                     bottom: 0;
                     left: 0;
                     width: 100%;
-                    background-color: #f0f2f6;
+                    background-color: #f7f7f7;
                     color: #666;
                     padding: 10px;
                     font-size: 12px;
@@ -101,19 +101,24 @@ st.markdown("""
                     }
                     
                     .custom-container-1 h5 {
-                        color: #ffffff !important;
+                        color: #b0b0b0 !important;
+                    }
+                    
+                    /* Welcome message text color in dark mode */
+                    [data-testid="stMarkdownContainer"] p {
+                        color: #b0b0b0 !important;
                     }
                     
                     .footer {
-                        background-color: #1e1e1e !important;
+                        background-color: #0e1117 !important;
                         color: #cccccc !important;
-                        border-top: 1px solid #444 !important;
+                        border-top: 1px solid #262730 !important;
                     }
                     
                     /* Ensure expander content text is readable in dark mode */
                     .stExpander [data-testid="stMarkdownContainer"] h5,
                     .stExpander [data-testid="stMarkdownContainer"] p {
-                        color: #ffffff !important;
+                        color: #b0b0b0 !important;
                     }
                     
                     /* Fix table styling in dark mode */
@@ -151,24 +156,125 @@ st.markdown("""
 #HOME PAGE
 #--------------------------------------
 def home():
+        # Custom button styling and card shadows for home page only
+        st.markdown("""
+        <style>
+        /* Light mode button styling */
+        button[kind="secondary"] {
+            background-color: #f7f7f7 !important;
+            color: #262730 !important;
+            border: 1px solid #d0d0d0 !important;
+        }
+        
+        button[kind="secondary"]:hover {
+            background-color: #ffffff !important;
+            color: #262730 !important;
+            border: 1px solid #b0b0b0 !important;
+        }
+        
+        /* Dark mode - maintain button visibility */
+        @media (prefers-color-scheme: dark) {
+            button[kind="secondary"] {
+                background-color: #1e232a !important;
+                color: #ffffff !important;
+                border: 1px solid #4a4a4a !important;
+            }
+            
+            button[kind="secondary"]:hover {
+                background-color: #2d333a !important;
+                color: #ffffff !important;
+                border: 1px solid #666666 !important;
+            }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.write("")
+        # Full-width bordered container with centered logo
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([1, 3, 1])
+            with col2:
+                st.image("Sequent.png", use_container_width=True)
+        
+        # Centered welcome message
+        st.markdown("""
+        <p style='text-align: center; font-size: 18px; color: #666; margin-top: 30px; margin-bottom: 10px; font-weight: bold;'>
+        WELCOME TO SEQUENT<sup>™</sup>, YOUR ONE-STOP SHOP SNOWFLAKE NATIVE APPLICATION FOR BEHAVIORAL INTELLIGENCE.
+        </p>
+        <p style='text-align: center; font-size: 18px; color: #666; margin-top: 0px; margin-bottom: 40px; font-weight: bold;'>
+        DECODE YOUR CUSTOMER JOURNEYS AND UNLOCK INSIGHTS, RIGHT WHERE YOUR DATA LIVES.
+        </p>
+        """, unsafe_allow_html=True)
+        
+
+        
+        # Module cards
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Path Analysis</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Uncover and compare behavioral journeys.</p>", unsafe_allow_html=True)
+                if st.button("Analyze Paths", key="path_btn", use_container_width=True):
+                    st.switch_page("1_PathAnalysis.py")
+        
+        with col2:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Pattern Mining</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Discover frequent sequences and timing patterns.</p>", unsafe_allow_html=True)
+                if st.button("Explore Patterns", key="pattern_btn", use_container_width=True):
+                    st.switch_page("4_PatternMining.py")
+        
+        with col3:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Attribution Analysis</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Measure touchpoint contribution to outcomes.</p>", unsafe_allow_html=True)
+                if st.button("Analyze Attribution", key="attr_btn", use_container_width=True):
+                    st.switch_page("2_AttributionAnalysis.py")
+
+        
+        st.write("")
+        
+        col4, col5, col6 = st.columns(3)
+        
+        with col4:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Behavioral Segmentation</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Group customers by journey patterns.</p>", unsafe_allow_html=True)
+                if st.button("Segment Customers", key="segment_btn", use_container_width=True):
+                    st.switch_page("6_BehavioralSegmentation.py")
+        
+        with col5:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Association Analysis</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Uncover relationships between events.</p>", unsafe_allow_html=True)
+                if st.button("Find Associations", key="assoc_btn", use_container_width=True):
+                    st.switch_page("3_AssociationAnalysis.py")
+        
+        with col6:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-top: 20px;'>Predictive Modeling</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>Anticipate outcomes based on sequence history.</p>", unsafe_allow_html=True)
+                if st.button("Predict Outcomes", key="predict_btn", use_container_width=True):
+                    st.switch_page("5_PredictiveModeling.py")
+        
         st.write("")
         st.write("")
-        st.image("snowpathimage.png",use_container_width=True)
-        #st.image("https://i.postimg.cc/8PWc0cMf/snowpathlogo2.png",use_container_width=True)
-    
+        
+        # About section - original content
         with st.expander("**ABOUT**"):
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-             <b>Snowpath</b><sup>™</sup> native application allows users to easily and visually perform and deep dive into <span style="color:#29B5E8;">Path Analysis</span>, <span style="color:#29B5E8;">Attribution Analysis</span>, <span style="color:#29B5E8;">Association Analysis</span>, <span style="color:#29B5E8;">Pattern Mining</span>, and <span style="color:#29B5E8;">Behavioral Segmentation</span> by simply specifying a few parameters in drop-down menus. Leveraging advanced techniques, <b>Snowpath</b><sup>™</sup> intuitively and visually helps identify touchpoints influencing customer (or machine) behaviours, targets them to create segments, performs cross-population behavioural comparisons, computes rule-based and ML-driven attribution models to understand the contribution of each event preceding a specific outcome, conducts association analysis to uncover hidden patterns and relationships between events, discovers frequent sequential patterns and behavioral signatures through advanced pattern mining, and enables sophisticated behavioral segmentation to group customers based on their journey patterns and characteristics. <b>Snowpath</b><sup>™</sup> also harnesses the interpretive and generative power of LLMs thanks to Snowflake AISQL to explain journeys, attribution models, association rules, pattern insights and derive insights (summarize and analyze results, describe behaviors and even suggest actions !)
+             <b>Sequent</b><sup>™</sup> native application allows users to easily and visually perform and deep dive into <b>Path Analysis</b>, <b>Attribution Analysis</b>, <b>Association Analysis</b>, <b>Pattern Mining</b>, and <b>Behavioral Segmentation</b> by simply specifying a few parameters in drop-down menus. Leveraging advanced techniques, <b>Sequent</b><sup>™</sup> intuitively and visually helps identify touchpoints influencing customer (or machine) behaviours, targets them to create segments, performs cross-population behavioural comparisons, computes rule-based and ML-driven attribution models to understand the contribution of each event preceding a specific outcome, conducts association analysis to uncover hidden patterns and relationships between events, discovers frequent sequential patterns and behavioral signatures through advanced pattern mining, and enables sophisticated behavioral segmentation to group customers based on their journey patterns and characteristics. <b>Sequent</b><sup>™</sup> also harnesses the interpretive and generative power of LLMs thanks to Snowflake AISQL to explain journeys, attribution models, association rules, pattern insights and derive insights (summarize and analyze results, describe behaviors and even suggest actions !)
         </h5>
         """, unsafe_allow_html=True)
             
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-             Visualizing and identifying paths can itself be actionable and often uncovers an area of interest for additional analysis. First, the picture revealed by path analysis can be further enriched with attribution analysis, association analysis, pattern mining, and behavioral segmentation. Attribution helps quantify the contribution of individual touchpoints to a defined outcome, association analysis uncovers relationships between events that frequently occur together, pattern mining discovers frequent sequential behaviors and hidden temporal dependencies, and behavioral segmentation groups customers into meaningful clusters based on their journey characteristics and patterns. Together, these techniques provide a comprehensive understanding of event sequences, enabling data-driven decision-making and uncovering new opportunities for optimization. Second, path insights can be used directly to predict outcomes (<span style="color:#29B5E8;">Predictive Modeling</span>) or to derive behavioral features (such as the frequency of specific patterns and sequence signatures). These features can then be integrated into existing predictive models, enhancing their accuracy and enabling deeper customer understanding through advanced segmentation strategies.
+             Visualizing and identifying paths can itself be actionable and often uncovers an area of interest for additional analysis. First, the picture revealed by path analysis can be further enriched with attribution analysis, association analysis, pattern mining, and behavioral segmentation. Attribution helps quantify the contribution of individual touchpoints to a defined outcome, association analysis uncovers relationships between events that frequently occur together, pattern mining discovers frequent sequential behaviors and hidden temporal dependencies, and behavioral segmentation groups customers into meaningful clusters based on their journey characteristics and patterns. Together, these techniques provide a comprehensive understanding of event sequences, enabling data-driven decision-making and uncovering new opportunities for optimization. Second, path insights can be used directly to predict outcomes (<b>Predictive Modeling</b>) or to derive behavioral features (such as the frequency of specific patterns and sequence signatures). These features can then be integrated into existing predictive models, enhancing their accuracy and enabling deeper customer understanding through advanced segmentation strategies.
         </h5>
         """, unsafe_allow_html=True)
-            
+        
         st.markdown("""
         <div class="footer">
             Copyright &copy; 2025 Yannis Marigo. All rights reserved.
@@ -210,7 +316,7 @@ def help():
 
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-             <b>Snowpath</b><sup>™</sup> helps identifying paths and patterns in data in a valuable way to gain insight into the occurrences leading to or from any event of interest, between two events of interest, or before and after any event of interest. In the <span style="color:#29B5E8;">Analyze</span> tab of the <span style="color:#29B5E8;">Path Analysis</span> page, users can visually dive deep into paths by simply specifying a few parameters in drop-down menus. Paths can be visualized using four differents methods:</br>   
+             <b>Sequent</b><sup>™</sup> helps identifying paths and patterns in data in a valuable way to gain insight into the occurrences leading to or from any event of interest or between two events of interest. In the Analyze tab of the Path Analysis page, users can visually dive deep into paths by simply specifying a few parameters in drop-down menus. Paths can be visualized using four differents methods:</br>   
                 1. <b><i>Sankey</i></b>: The Sankey diagram is a flow diagram used to visualize paths, transitions, or sequences of events in data. In the context of path analysis, a Sankey diagram helps represent how users, customers, or entities flow through different stages or events. The Sankey diagram merges user paths. Single-event paths are not displayed in a Sankey diagram, use the Sunburst Diagram instead.</br>
                 2. <b><i>Tree</i></b>: A Tree Diagram in path analysis is a hierarchical visualization of sequential events or decisions taken by users, customers, or entities. It is useful for understanding how different paths diverge and lead to specific outcomes. The Tree Diagram visualizes complete users’ paths and allows targeting underlying customers following a specific path to create a segment, which can then be stored in a table and leveraged for further analysis, personalization, or activation within a selected database and schema.</br>
                 3. <b><i>Force Layout Graph</i></b>: A Force Layout Graph is a dynamic visualization used in path analysis to represent connections between events. It demonstrates the relationship between the different events that are part of the customer journey. This visualization provides a good understanding of which events are most closely related and which events most frequently lead to other specific events.</br>
@@ -267,7 +373,7 @@ def help():
             
             st.markdown("""
             <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-                <b>Snowpath</b><sup>™</sup> similarly helps uncover key behavioral differences between path-based segments. The <span style="color:#29B5E8;">Compare</span> tab of the <span style="color:#29B5E8;">Path Analysis</span> page enables path-based behavioral analysis by comparing event sequences across two populations.</br> It offers two modes for comparison:</br>
+                <b>Sequent</b><sup>™</sup> similarly helps uncover key behavioral differences between path-based segments. The Compare tab of the Path Analysis page enables path-based behavioral analysis by comparing event sequences across two populations.</br> It offers two modes for comparison:</br>
                 1. <b><i>Complement Mode</i></b>: This mode focuses on ensemble-based analysis by comparing a poluation defined by a reference set of paths against everything outside of it.</br>
                 2. <b><i>Union Mode</i></b>: This mode performs a comparative analysis between two defined sets of paths (i.e., user groups/populations), accounting for any potential overlap.
             </h5>
@@ -283,7 +389,7 @@ def help():
 
             st.markdown("""
             <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-                <b>Snowpath</b><sup>™</sup> also harnesses the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain user journeys. This AI-powered explainability feature enables users to ask natural language questions about identified paths in order to summarize behaviors, uncover insights, and suggest potential actions or mitigations."  
+                <b>Sequent</b><sup>™</sup> also harnesses the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain user journeys. This AI-powered explainability feature enables users to ask natural language questions about identified paths in order to summarize behaviors, uncover insights, and suggest potential actions or mitigations."  
              </h5>
             """, unsafe_allow_html=True)
             
@@ -313,13 +419,13 @@ def help():
 
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-            Rule-based attribution modeling relies on predetermined rules or heuristics to assign credit to various touchpoints along the customer journey. <b>Snowpath</b><sup>™</sup> rule-based models include the <b>First Touch</b>, <b>Last Touch</b>, <b>Uniform (linear)</b>, <b>U-shaped</b> and <b>Exponential (time decay)</b> models. The First Touch model attributes all credit to the first touchpoint a customer interacts with, while the Last Touch model assigns all credit to the final touchpoint before conversion. The Uniform model evenly distributes credit across all touchpoints in the customer journey. The Exponential model assigns more credit to touchpoints closer to the conversion event.
+            Rule-based attribution modeling relies on predetermined rules or heuristics to assign credit to various touchpoints along the customer journey. <b>Sequent</b><sup>™</sup> rule-based models include the <b>First Touch</b>, <b>Last Touch</b>, <b>Uniform (linear)</b>, <b>U-shaped</b> and <b>Exponential (time decay)</b> models. The First Touch model attributes all credit to the first touchpoint a customer interacts with, while the Last Touch model assigns all credit to the final touchpoint before conversion. The Uniform model evenly distributes credit across all touchpoints in the customer journey. The Exponential model assigns more credit to touchpoints closer to the conversion event.
         </h5>
         """, unsafe_allow_html=True)
 
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-             Algorithmic attribution modeling, in contrast, leverages advanced statistical and machine learning techniques to evaluate the contribution of each touchpoint. These models consider factors such as the sequence, timing, and interaction patterns of touchpoints. <b>Snowpath</b><sup>™</sup> algorithmic models include the <b>Markov model</b> and the <b>Shapley Value model</b>. The Markov model is a data-driven approach that applies the principles of Markov Chains to analyze marketing effectiveness. Markov Chains are mathematical frameworks that describe systems transitioning from one state to another in a sequential manner. This approach utilizes a transition matrix, derived from analyzing customer journeys from initial interactions to conversions or non-conversions, to capture the sequential nature of interactions and assess how each touchpoint influences the ultimate decision. The Shapley Value model, derived from cooperative game theory, provides a fair allocation of credit by considering the marginal contribution of each touchpoint across all possible combinations of events in the customer journey.
+             Algorithmic attribution modeling, in contrast, leverages advanced statistical and machine learning techniques to evaluate the contribution of each touchpoint. These models consider factors such as the sequence, timing, and interaction patterns of touchpoints. <b>Sequent</b><sup>™</sup> algorithmic models include the <b>Markov model</b> and the <b>Shapley Value model</b>. The Markov model is a data-driven approach that applies the principles of Markov Chains to analyze marketing effectiveness. Markov Chains are mathematical frameworks that describe systems transitioning from one state to another in a sequential manner. This approach utilizes a transition matrix, derived from analyzing customer journeys from initial interactions to conversions or non-conversions, to capture the sequential nature of interactions and assess how each touchpoint influences the ultimate decision. The Shapley Value model, derived from cooperative game theory, provides a fair allocation of credit by considering the marginal contribution of each touchpoint across all possible combinations of events in the customer journey.
         </h5>
         """, unsafe_allow_html=True)
 
@@ -348,7 +454,7 @@ def help():
                 
             st.markdown("""
     <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;"> 
-        Another way to interpret the  attribution scores is to visualize them using charts. <b>Snowpath</b><sup>™</sup> 
+        Another way to interpret the  attribution scores is to visualize them using charts. <b>Sequent</b><sup>™</sup> 
         provides two additional ways to explore attribution analysis effectively:
         <br><br>
         1. <i><b>Bar Chart</b></i>: This Attribution Summary bar chart visually compares the attribution scores assigned to each event across different attribution models.
@@ -361,7 +467,7 @@ def help():
 
             st.markdown("""
             <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-                <b>Snowpath</b><sup>™</sup> also leverages the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain attribution results. This AI-powered explainability feature enables users to ask natural language questions about model outputs to understand how credit was assigned, identify key influencing factors, and suggest potential optimizations or next best actions."  
+                <b>Sequent</b><sup>™</sup> also leverages the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain attribution results. This AI-powered explainability feature enables users to ask natural language questions about model outputs to understand how credit was assigned, identify key influencing factors, and suggest potential optimizations or next best actions."  
              </h5>
             """, unsafe_allow_html=True)
             
@@ -405,7 +511,7 @@ def help():
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;"> 
             Thresholds can be applied to all metrics to filter the rules according to your criteria. 
-            Another way to interpret the association rules metrics is to visualize them using charts. <b>Snowpath</b><sup>™</sup> 
+            Another way to interpret the association rules metrics is to visualize them using charts. <b>Sequent</b><sup>™</sup> 
             provides two additional ways to explore association patterns effectively:
             <br><br>
             1. <i><b>Heatmap</b></i>: The heatmap provides a structured grid-based visualization where rows and columns represent different items, 
@@ -421,14 +527,14 @@ def help():
 
             st.markdown("""
             <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-                <b>Snowpath</b><sup>™</sup> also leverages the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain association rule results. This AI-powered explainability feature allows users to ask natural language questions about discovered patterns to better understand item relationships, extract actionable insights, and identify opportunities for cross-sell, upsell, or optimization."  
+                <b>Sequent</b><sup>™</sup> also leverages the interpretive and generative capabilities of LLMs through Snowflake AISQL to explain association rule results. This AI-powered explainability feature allows users to ask natural language questions about discovered patterns to better understand item relationships, extract actionable insights, and identify opportunities for cross-sell, upsell, or optimization."  
              </h5>
             """, unsafe_allow_html=True)
             
             st.markdown("""
     <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
         For more interactive and customizable network visualization and analysis, results can be exported into Gefx format and then imported into 
-        <a href="https://gephi.org/gephi-lite/" target="_blank" style="color: #29B5E8; text-decoration: none; font-weight: bold;">
+        <a href="https://gephi.org/gephi-lite/" target="_blank" text-decoration: none; font-weight: bold;">
             Gephi Lite
         </a>. 
         Gephi Lite is a free and open-source web application to visualize and explore networks and graphs.
@@ -444,7 +550,7 @@ def help():
             
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-            <b>Snowpath</b><sup>™</sup> Pattern Mining offers four distinct pattern definition modes to capture different types of behavioral insights:
+            <b>Sequent</b><sup>™</sup> Pattern Mining offers four distinct pattern definition modes to capture different types of behavioral insights:
             <br><br>
             1. <b><i>All Patterns</i></b>: Discovers all possible sequential patterns of specified lengths, providing comprehensive coverage of behavioral sequences without constraints.
             <br>
@@ -464,13 +570,13 @@ def help():
             
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-            Pattern mining results include detailed statistical analysis with frequency counts, unique user reach, percentage distributions, sequence length analytics, and time gap analytics (average, minimum, and maximum). Interactive visualizations provide multiple perspectives including frequency rankings, pattern length distributions, and reach-versus-frequency scatter plots to identify the most impactful behavioral patterns.
+            Pattern mining results include detailed statistical analysis with frequency counts, unique user reach, percentage distributions, and sequence length analytics. Interactive visualizations provide multiple perspectives including frequency rankings, pattern length distributions, and reach-versus-frequency scatter plots to identify the most impactful behavioral patterns.
         </h5>
         """, unsafe_allow_html=True)
 
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-            <b>AI-Powered Insights:</b> <b>Snowpath</b><sup>™</sup> leverages Snowflake Cortex LLMs with dynamic model selection (including Mixtral, Mistral, Llama, and Gemma models) to provide intelligent explanations of discovered patterns. The AI analysis interprets statistical findings within business context, suggesting optimization opportunities, identifying behavioral anomalies, and providing actionable recommendations for customer journey improvement.
+            <b>AI-Powered Insights:</b> <b>Sequent</b><sup>™</sup> leverages Snowflake Cortex LLMs with dynamic model selection (including Mixtral, Mistral, Llama, and Gemma models) to provide intelligent explanations of discovered patterns. The AI analysis interprets statistical findings within business context, suggesting optimization opportunities, identifying behavioral anomalies, and providing actionable recommendations for customer journey improvement.
         </h5>
         """, unsafe_allow_html=True)
         
@@ -483,7 +589,7 @@ def help():
         with st.expander("Prediction Modeling", icon=":material/model_training:"):
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-         <b>Snowpath</b><sup>™</sup> Predictive Modeling transforms customer journey data into powerful predictive insights by creating and training machine learning models directly in Snowflake. It leverages <b>Snowpark ML</b> and <b>Scikit-learn</b> classification algorithms to predict binary outcomes based on user behavior paths and their underlying event sequences. Users can choose from multiple algorithms optimized for different scenarios and compute requirements.
+         <b>Sequent</b><sup>™</sup> Predictive Modeling transforms customer journey data into powerful predictive insights by creating and training machine learning models directly in Snowflake. It leverages <b>Snowpark ML</b> and <b>Scikit-learn</b> classification algorithms to predict binary outcomes based on user behavior paths and their underlying event sequences. Users can choose from multiple algorithms optimized for different scenarios and compute requirements.
         </h5>
         """, unsafe_allow_html=True)
             
@@ -543,7 +649,7 @@ def help():
 
             st.markdown("""
         <h5 style="font-size: 13px; font-weight: normal; color: black; margin-top: 0px; margin-bottom: -15px;">
-            <b>Snowpath</b><sup>™</sup> Behavioral Segmentation uses advanced machine learning techniques to transform customer event sequences into meaningful behavioral patterns. The process involves two main approaches: <b>Event2Vec clustering</b> for embedding-based analysis and <b>Latent Dirichlet Allocation (LDA)</b> for topic-based segmentation.
+            <b>Sequent</b><sup>™</sup> Behavioral Segmentation uses advanced machine learning techniques to transform customer event sequences into meaningful behavioral patterns. The process involves two main approaches: <b>Event2Vec clustering</b> for embedding-based analysis and <b>Latent Dirichlet Allocation (LDA)</b> for topic-based segmentation.
         </h5>
         """, unsafe_allow_html=True)
 
@@ -619,17 +725,16 @@ def help():
         </h5>
         """, unsafe_allow_html=True)
 
-st.logo("snowpathlogo.png",  size="large", link=None, icon_image="snowpathlogo.png")
+st.logo("Sequent.png",  size="large", link=None, icon_image="Sequent.png")
 
 pg = st.navigation([
-    #st.Page(home, title="Home", icon="*️⃣"),
     st.Page(home, title="Home", icon=":material/home:"),
     st.Page("1_PathAnalysis.py", title="Path Analysis", icon=":material/conversion_path:"),
+    st.Page("4_PatternMining.py", title="Pattern Mining", icon=":material/auto_awesome:"),
     st.Page("2_AttributionAnalysis.py", title="Attribution Analysis", icon=":material/bar_chart:"),
     st.Page("3_AssociationAnalysis.py", title="Association Analysis", icon=":material/graph_3:"),
-    st.Page("4_PatternMining.py", title="Pattern Mining", icon=":material/auto_awesome:"),
-    st.Page("5_PredictiveModeling.py", title="Predictive Modeling", icon=":material/model_training:"),
     st.Page("6_BehavioralSegmentation.py", title="Behavioral Segmentation", icon=":material/groups:"),
+    st.Page("5_PredictiveModeling.py", title="Predictive Modeling", icon=":material/model_training:"),
     st.Page(help, title="User Guide", icon=":material/quick_reference:")
 ],expanded=False)
 pg.run()
