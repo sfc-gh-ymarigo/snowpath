@@ -57,7 +57,7 @@ div[data-testid="stSuccess"] {
 }
 
 .custom-container-1 {
-    background-color: #f0f2f6 !important;
+    background-color: #f7f7f7 !important;
     padding: 10px;
     border-radius: 5px;
     margin-bottom: 10px;
@@ -86,7 +86,7 @@ div[data-testid="stSuccess"] * {
 }
 
 .stAlert[data-baseweb="notification"] {
-    background-color: #f0f2f6 !important;
+    background-color: #f7f7f7 !important;
     border: none !important;
     --baseRadius: 10px !important;
     baseRadius: 10px !important;
@@ -94,7 +94,7 @@ div[data-testid="stSuccess"] * {
 }
 
 .stAlert[data-baseweb="notification"] > div {
-    background-color: #f0f2f6 !important;
+    background-color: #f7f7f7 !important;
     --baseRadius: 10px !important;
     baseRadius: 10px !important;
     border-radius: 10px !important;
@@ -179,7 +179,7 @@ div[data-testid="stInfo"]::before {
     }
     
     .custom-container-1 h5 {
-        color: #ffffff !important;
+        color: #b0b0b0 !important;
     }
     
     /* Custom styling for all message types in dark mode */
