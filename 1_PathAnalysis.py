@@ -1749,7 +1749,9 @@ with tab1:
                         # Get the remaining columns after excluding the selected ones
                         remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
                 else :
-                    st.write("")
+                        partitionby = f"partition by {uid}"
+                        groupby = f"group by {uid}, match_number "
+                        remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
                     
                     
     #--------------------------------------
@@ -3794,7 +3796,7 @@ with tab1:
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                     {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                 SELECT *FROM sessions) 
                             match_recognize(
                             {partitionby} 
@@ -4220,7 +4222,9 @@ with tab2:
                         # Get the remaining columns after excluding the selected ones
                         remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
                 else :
-                    st.write("")
+                        partitionby = f"partition by {uid}"
+                        groupby = f"group by {uid}, match_number "
+                        remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
                 #--------------------------------------
                 #FILTERS
                 #--------------------------------------
@@ -4586,7 +4590,9 @@ with tab2:
                         # Get the remaining columns after excluding the selected ones
                         remaining_columns1 = colsdf1[~colsdf1['COLUMN_NAME'].isin([uid1, evt1, tmstp1])]['COLUMN_NAME']
                 else :
-                    st.write("")
+                        partitionby1 = f"partition by {uid1}"
+                        groupby1 = f"group by {uid1}, match_number "
+                        remaining_columns1 = colsdf1[~colsdf1['COLUMN_NAME'].isin([uid1, evt1, tmstp1])]['COLUMN_NAME']
             
                 # --------------------------------------
                 # FILTERS (Comp)
@@ -4858,7 +4864,7 @@ with tab2:
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions) match_recognize(
                             {partitionby} 
                             order by {tmstp} 
@@ -4901,7 +4907,7 @@ with tab2:
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions)
                             match_recognize(
                             {partitionby} 
@@ -5221,7 +5227,7 @@ with tab2:
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions)
                             match_recognize(
                             {partitionby} 
@@ -5268,7 +5274,7 @@ with tab2:
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions)
                             match_recognize(
                             {partitionby} 
@@ -5600,7 +5606,7 @@ with tab2:
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions) 
                             match_recognize(
                             {partitionby} 
@@ -5643,7 +5649,7 @@ with tab2:
                         from  (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
                         {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
                         ,sessions AS (SELECT {uid1},{tmstp1},{evt1},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout1} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions) 
                             match_recognize(
                             {partitionby1} 
@@ -5961,7 +5967,7 @@ with tab2:
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                         ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions) 
                             match_recognize(
                             {partitionby} 
@@ -6005,7 +6011,7 @@ with tab2:
                         from (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
                         {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
                         ,sessions AS (SELECT {uid1},{tmstp1},{evt1},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout1} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                        OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS session FROM events_with_diff)
+                        OVER (PARTITION BY {uid1} ORDER BY {tmstp1}) AS SESSION FROM events_with_diff)
                         SELECT *FROM sessions) 
                             match_recognize(
                             {partitionby1} 
