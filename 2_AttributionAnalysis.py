@@ -1558,7 +1558,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     from MATCHED_SEQUENCES
                 ),
                 FILTERED_SEQUENCES AS (
-                    select {uid}, msq, {tmstp}, {evt}, cl
+                    select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                     from GAP_FILTERED_SEQUENCES
                     WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
                 )"""
@@ -1566,7 +1566,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
                 attributionsql= f"""
                 WITH MATCHED_SEQUENCES AS (
-                    select {uid}, msq, {tmstp}, {evt}, cl
+                    select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                     from (select * from {database}.{schema}.{tbl} where {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                     match_recognize(
                         {partitionby}
@@ -1578,7 +1578,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     )
                 ){comma_separator}{gap_filtering_ctes}
                 ,ALLOTHERS AS (
-                    select {uid}, msq, {tmstp}, {evt},
+                    select {uid}, SESSION, msq, {tmstp}, {evt},
                     CASE WHEN msq = (max(msq) OVER ({partitionby}))-1 THEN '1' 
                          WHEN msq = (max(msq) OVER ({partitionby})) THEN NULL 
                          ELSE '0' END AS LASTCLICK,
@@ -1607,7 +1607,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                      ELSE 0 
                  END) OVER ({partitionby})) END as expdecay
                     from (
-                        SELECT {uid}, msq, MAX(MSQ) OVER ({partitionby}) AS max_msq
+                        SELECT {uid}, SESSION, msq, MAX(MSQ) OVER ({partitionby}) AS max_msq
                         FROM {source_table_alias}
                     )
                 )
@@ -1638,7 +1638,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     from MATCHED_SEQUENCES
                 ),
                 FILTERED_SEQUENCES AS (
-                    select {uid}, msq, {tmstp}, {evt}, cl
+                    select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                     from GAP_FILTERED_SEQUENCES
                     WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
                 )"""
@@ -1646,11 +1646,11 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
                 attributionsql= f"""
                 WITH MATCHED_SEQUENCES AS (
-                    select {uid}, msq, {tmstp}, {evt}, cl
+                    select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                     from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                                 {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                                 SELECT *FROM sessions) 
                     match_recognize(
                         {partitionby}
@@ -1662,7 +1662,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                     )
                 ){comma_separator}{gap_filtering_ctes}
                 ,ALLOTHERS AS (
-                    select {uid}, msq, {tmstp}, {evt},
+                    select {uid}, SESSION, msq, {tmstp}, {evt},
                     CASE WHEN msq = (max(msq) OVER ({partitionby}))-1 THEN '1' 
                          WHEN msq = (max(msq) OVER ({partitionby})) THEN NULL 
                          ELSE '0' END AS LASTCLICK,
@@ -1691,7 +1691,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                      ELSE 0 
                  END) OVER ({partitionby})) END as expdecay
                     from (
-                        SELECT {uid}, msq, MAX(MSQ) OVER ({partitionby}) AS max_msq
+                        SELECT {uid}, SESSION, msq, MAX(MSQ) OVER ({partitionby}) AS max_msq
                         FROM {source_table_alias}
                     )
                 )
@@ -1743,7 +1743,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                 from MATCHED_SEQUENCES
             ),
             FILTERED_SEQUENCES AS (
-                select {uid}, msq, {tmstp}, {evt}, cl
+                select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                 from GAP_FILTERED_SEQUENCES
                 WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
             )"""
@@ -1751,7 +1751,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
             crttblrawsmceventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
             WITH MATCHED_SEQUENCES AS (
-                select {uid}, msq, {tmstp}, {evt}, cl
+                select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                 from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                     match_recognize(
                     {partitionby} 
@@ -1784,7 +1784,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                 from MATCHED_SEQUENCES
             ),
             FILTERED_SEQUENCES AS (
-                select {uid}, msq, {tmstp}, {evt}, cl
+                select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                 from GAP_FILTERED_SEQUENCES
                 WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
             )"""
@@ -1792,11 +1792,11 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
             crttblrawsmceventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
             WITH MATCHED_SEQUENCES AS (
-                select {uid}, msq, {tmstp}, {evt}, cl
+                select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                 from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                 {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                 SELECT *FROM sessions) match_recognize(
                     {partitionby} 
                     order by {tmstp} 
@@ -1811,6 +1811,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
             WHERE cl != 'B' {groupby}) """
             
         # Run the SQL
+        #st.write(crttblrawsmceventsref)
         crttblrawsmceventsref = session.sql(crttblrawsmceventsrefsql).collect()
         
         # OPTIMIZATION: Aggregate by unique paths with frequency counts to reduce data volume
@@ -2026,7 +2027,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                  from MATCHED_SEQUENCES
              ),
              FILTERED_SEQUENCES AS (
-                 select {uid}, msq, {tmstp}, {evt}, cl
+                 select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                  from GAP_FILTERED_SEQUENCES
                  WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
              )""".format(uid=uid, msq="msq", tmstp=tmstp, evt=evt, partitionby=partitionby, max_gap_days=max_gap_days)
@@ -2034,7 +2035,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
              crttblrawsmceventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
              WITH MATCHED_SEQUENCES AS (
-                 select {uid}, msq, {tmstp}, {evt}, cl
+                 select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                  from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                      match_recognize(
                      {partitionby} 
@@ -2067,7 +2068,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
                  from MATCHED_SEQUENCES
              ),
              FILTERED_SEQUENCES AS (
-                 select {uid}, msq, {tmstp}, {evt}, cl
+                 select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                  from GAP_FILTERED_SEQUENCES
                  WHERE TIMESTAMPDIFF(day, first_a_timestamp, last_a_timestamp) <= {max_gap_days}
              )"""
@@ -2075,11 +2076,11 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
 
              crttblrawsmceventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
              WITH MATCHED_SEQUENCES AS (
-                 select {uid}, msq, {tmstp}, {evt}, cl
+                 select {uid}, SESSION, msq, {tmstp}, {evt}, cl
                  from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                  {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                  ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                  SELECT *FROM sessions) match_recognize(
                      {partitionby} 
                      order by {tmstp} 
@@ -2094,6 +2095,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
              WHERE cl != 'B' {groupby}) """
              
          # Run the SQL
+         #st.write (crttblrawsmceventsrefsql)
          crttblrawsmceventsref = session.sql(crttblrawsmceventsrefsql).collect()
         
          # Generate a unique comp table name
@@ -2127,7 +2129,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
              {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
              {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {conv}='{conv_value}' )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
              ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-             OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+             OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
              SELECT *FROM sessions)
                  match_recognize(
                  {partitionby} 
