@@ -604,12 +604,14 @@ with st.expander("Input Parameters (Primary Class)", icon=":material/settings:")
                      remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp,sess])]['COLUMN_NAME']
  
              elif sess == None and unitoftime !=None and timeout !=None:
-                     partitionby=f"partition by {uid},SESSION "
-                     groupby = f"group by {uid}, match_number,SESSION "
-                     # Get the remaining columns after excluding the selected ones
-                     remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
+                    partitionby=f"partition by {uid},SESSION "
+                    groupby = f"group by {uid}, match_number,SESSION "
+                    # Get the remaining columns after excluding the selected ones
+                    remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
              else :
-                 st.write("")
+                    partitionby = f"partition by {uid}"
+                    groupby = f"group by {uid}, match_number "
+                    remaining_columns = colsdf[~colsdf['COLUMN_NAME'].isin([uid, evt, tmstp])]['COLUMN_NAME']
              #--------------------------------------
              #FILTERS
              #--------------------------------------
@@ -1027,7 +1029,7 @@ if inputs_ready and run_model_button and not cleanup_just_clicked and not ai_mod
                   from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                   {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                   ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                   SELECT *FROM sessions) match_recognize(
                       {partitionby} 
                       order by {tmstp} 
@@ -1073,7 +1075,7 @@ if inputs_ready and run_model_button and not cleanup_just_clicked and not ai_mod
                   {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {database}.{schema}.{unique_reftable_name} ) AND
                   {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause})
                   ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session FROM events_with_diff)
+                  OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION FROM events_with_diff)
                   SELECT *FROM sessions)
                       match_recognize(
                       {partitionby} 
