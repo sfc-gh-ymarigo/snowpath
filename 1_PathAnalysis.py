@@ -1579,7 +1579,7 @@ with tab1:
                         
                         if both_any:
                             # Force Min/Max Events for Any→Any pattern
-                            st.info("ℹ️ Time Window not available for Any → Any patterns. Using Min/Max Events.")
+                            st.info("Time Window not available for Any → Any patterns. Using Min/Max Events.", icon=":material/info:")
                             pattern_approach = "Min/Max Events"
                             time_window_label = "Time Window"
                             time_window_help = "Choose between event count limits or time-based window filtering"
@@ -1900,51 +1900,49 @@ with tab1:
                         
                         # Generate SQL WHERE clause based on selected filters and logic
                         if filters:
-                                
                             sql_where_clause = " AND "
-                        #st.write(filters)
-                        for i, (col, operator, value) in enumerate(filters):
-                            if i > 0 and logic_operator:
-                                sql_where_clause += f" {logic_operator} "
-                            
-                            # Handle NULL operators
-                            if operator in ['IS NULL', 'IS NOT NULL']:
-                                sql_where_clause += f"{col} {operator}"
-                            
-                            # Handle IN and NOT IN operators
-                            elif operator in ['IN', 'NOT IN']:
-                                if len(value) == 1:
-                                    # Single value - convert to = or != for better performance
-                                    single_op = '=' if operator == 'IN' else '!='
-                                    if isinstance(value[0], (int, float)):
-                                        sql_where_clause += f"{col} {single_op} {value[0]}"
-                                    else:
-                                        sql_where_clause += f"{col} {single_op} '{value[0]}'"
-                                else:
-                                    # Multiple values - use proper IN/NOT IN with tuple
-                                    # Handle mixed types by converting all to strings for SQL safety
-                                    formatted_values = []
-                                    for v in value:
-                                        if isinstance(v, (int, float)):
-                                            formatted_values.append(str(v))
+                            #st.write(filters)
+                            for i, (col, operator, value) in enumerate(filters):
+                                if i > 0 and logic_operator:
+                                    sql_where_clause += f" {logic_operator} "
+                                
+                                # Handle NULL operators
+                                if operator in ['IS NULL', 'IS NOT NULL']:
+                                    sql_where_clause += f"{col} {operator}"
+                                
+                                # Handle IN and NOT IN operators
+                                elif operator in ['IN', 'NOT IN']:
+                                    if len(value) == 1:
+                                        # Single value - convert to = or != for better performance
+                                        single_op = '=' if operator == 'IN' else '!='
+                                        if isinstance(value[0], (int, float)):
+                                            sql_where_clause += f"{col} {single_op} {value[0]}"
                                         else:
-                                            formatted_values.append(f"'{v}'")
-                                    sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
-                            
-                            # Handle LIKE and NOT LIKE operators
-                            elif operator in ['LIKE', 'NOT LIKE']:
-                                sql_where_clause += f"{col} {operator} '{value}'"
-                            
-                            # Handle other operators (=, !=, <, <=, >, >=)
-                            else:
+                                            sql_where_clause += f"{col} {single_op} '{value[0]}'"
+                                    else:
+                                        # Multiple values - use proper IN/NOT IN with tuple
+                                        # Handle mixed types by converting all to strings for SQL safety
+                                        formatted_values = []
+                                        for v in value:
+                                            if isinstance(v, (int, float)):
+                                                formatted_values.append(str(v))
+                                            else:
+                                                formatted_values.append(f"'{v}'")
+                                        sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
+                                
+                                # Handle LIKE and NOT LIKE operators
+                                elif operator in ['LIKE', 'NOT LIKE']:
+                                    sql_where_clause += f"{col} {operator} '{value}'"
+                                
+                                # Handle other operators (=, !=, <, <=, >, >=)
+                                else:
                                     if isinstance(value, (int, float)):
                                         sql_where_clause += f"{col} {operator} {value}"
                                     else:
-                                 # For non-numeric values (strings, dates), enclose the value in quotes
+                                        # For non-numeric values (strings, dates), enclose the value in quotes
                                         sql_where_clause += f"{col} {operator} '{value}'"        
-                            
                         else:
-                                # If no filters were created, ensure sql_where_clause is empty
+                            # If no filters were created, ensure sql_where_clause is empty
                             sql_where_clause = ""
         
     # SQL LOGIC
@@ -2002,7 +2000,7 @@ with tab1:
                  FROM
                 {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
          ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
+        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION
         FROM events_with_diff)
         SELECT *FROM sessions)
                         match_recognize(
@@ -2016,169 +2014,192 @@ with tab1:
                 {groupby} ) 
             group by path order by count desc 
             """
-            
-            before_after_agg = session.sql(before_after_agg_sql).collect()
-            res = pd.DataFrame(before_after_agg)
-            import ast
-            
-            if not res.empty:
-                def convert_uid_list(uid_entry):
-                    if isinstance(uid_entry, str):
-                        try:
-                            return ast.literal_eval(uid_entry)  # Safely convert string to list
-                        except:
-                            return []
-                    elif isinstance(uid_entry, list):
-                        return uid_entry
-                    else:
-                        return []
-                
-                res['UID_LIST'] = res['UID_LIST'].apply(convert_uid_list)
-                
-                # Save results
-                st.session_state['before_after_agg'] = res
-                
-                # Display success message
-                st.markdown(f"""
-                <div class="custom-container-1">
-                    <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
-                        Analysis complete: {len(res):,} unique paths retrieved from {res['COUNT'].sum():,} customer journeys
-                    </h5>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Create two columns for layout
-                col1, col2 = st.columns([2, 7])
-            
-                # Place the toggle in the first column
-                with col1:
-                    show_details_ba = st.toggle("Show me!", key="show_details_ba", help="Select a visualization option: Sankey or Graph.")
-
-                # Place the pills in the second column, but only if the toggle is on
-                with col2:
-                    if 'show_details_ba' in locals() and show_details_ba:
-                        genre_ba = st.pills(
-                            "Choose a visualization:",
-                            ["Sankey", "Graph"],
-                            label_visibility="collapsed",
-                            key="genre_ba"
-                        )
-                    else:
-                        genre_ba = None
-            
-                # Place the visualization outside of the columns layout
-                if show_details_ba and genre_ba:
-                    # Initialize hash for session state tracking
-                    current_df_hash = hash(res.to_json())
-                    if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
-                        st.session_state["last_df_hash"] = current_df_hash
-                    
-                    if genre_ba == 'Sankey':
-                        with st.container(border=True):
-                            col1, col2 = st.columns([1, 2])
-                            with col1:
-                                percentage_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_ba")
-                            with col2:
-                                st.write("")
-                            
-                            clicked_sankey_ba = sankey_chart(res, direction="before_after", topN_percentage=percentage_ba, middle_events=middle_event)
-                        
-                        if clicked_sankey_ba:
-                            sankeyLabel = st.session_state.get("sankey_labels", [])
-                            sortedEventList = st.session_state.get("sortedEventList", [])
-                            sankeyLinks = st.session_state.get("sankey_links", {})
-                            if "source" in clicked_sankey_ba and "target" in clicked_sankey_ba:
-                                source_index = clicked_sankey_ba["source"]
-                                target_index = clicked_sankey_ba["target"]
-                                clicked_source = sortedEventList[source_index]
-                                clicked_target = sortedEventList[target_index]
-                                source_parts = clicked_source.split('_', 1)
-                                target_parts = clicked_target.split('_', 1)
-                                source_name = source_parts[1] if len(source_parts) >= 2 else clicked_source
-                                target_name = target_parts[1] if len(target_parts) >= 2 else clicked_target
-                                st.caption(f"Selected Edge: {source_name} → {target_name}")
-                    
-                    elif genre_ba == 'Graph':
-                        with st.container(border=True):
-                            col1, col2 = st.columns([1, 2])
-                            with col1:
-                                percentage_graph_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_graph_ba")
-                            with col2:
-                                st.write("")
-                            
-                            topN_graph_ba = int(len(res) * percentage_graph_ba / 100)
-                            sigma_graph(res.head(topN_graph_ba))
-                
-                # View SQL toggle
-                if st.toggle("View SQL for Aggregated Paths", key="view_sql_ba", help="View the SQL query used for this analysis"):
-                    st.code(before_after_agg_sql, language="sql")
-                
-                # Writeback toggle
-                if st.toggle("Writeback Segments to Snowflake", key="writeback_before_after",
-                            help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
-                    with st.expander("Writeback Segments to Snowflake", expanded=True, icon=":material/upload:"):
-                        # Path selection
-                        st.markdown("**Select Paths to Export**")
-                        
-                        # Select All checkbox
-                        select_all_before_after = st.checkbox("Select All Paths", value=False, key="select_all_before_after")
-                        
-                        # Multiselect for paths
-                        if select_all_before_after:
-                            default_paths_before_after = res['PATH'].tolist()
-                        else:
-                            default_paths_before_after = []
-                        
-                        selected_paths_before_after = st.multiselect(
-                            "Choose path(s):",
-                            options=res['PATH'].tolist(),
-                            default=default_paths_before_after,
-                            key="selected_paths_before_after"
-                        )
-                        
-                        if selected_paths_before_after:
-                            # Filter dataframe
-                            filtered_df_before_after = res[res['PATH'].isin(selected_paths_before_after)]
-                            
-                            # Show export preview
-                            st.info(f"📊 Export Preview: {len(selected_paths_before_after)} path(s) selected, "
-                                   f"{filtered_df_before_after['COUNT'].sum():,} total occurrences, "
-                                   f"{filtered_df_before_after['UID_LIST'].apply(len).sum():,} total user IDs", 
-                                   icon=":material/info:")
-                            
-                            # Database/Schema/Table selection
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                wb_database_before_after = st.selectbox("Database", fetch_databases(session), key="wb_db_before_after")
-                            with col2:
-                                if wb_database_before_after:
-                                    wb_schema_before_after = st.selectbox("Schema", fetch_schemas(session, wb_database_before_after), key="wb_schema_before_after")
-                            
-                            wb_table_before_after = st.text_input("Table Name", value="PATH_SEGMENTS_BEFORE_AFTER", key="wb_table_before_after")
-                            
-                            wb_mode_before_after = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_before_after")
-                            
-                            if st.button("Write Table", key="write_btn_before_after"):
-                                if wb_database_before_after and wb_schema_before_after and wb_table_before_after:
-                                    try:
-                                        with st.spinner("Writing to Snowflake..."):
-                                            # Create Snowpark DataFrame
-                                            export_df_before_after = session.create_dataframe(filtered_df_before_after[['PATH', 'COUNT', 'UID_LIST']])
-                                            
-                                            # Write to table
-                                            if wb_mode_before_after == "Create or Replace":
-                                                export_df_before_after.write.mode("overwrite").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
-                                            else:
-                                                export_df_before_after.write.mode("append").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
-                                            
-                                            st.success(f"✅ Successfully wrote {len(filtered_df_before_after)} rows to {wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}", 
-                                                      icon=":material/check:")
-                                    except Exception as e:
-                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/error:")
-                                else:
-                                    st.warning("Please select database, schema, and table name", icon=":material/warning:")
             else:
-                st.info("No patterns found matching the criteria.", icon=":material/info:")
+                st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                st.stop()
+            
+            # Execute the SQL
+            if before_after_agg_sql is not None:
+                before_after_agg = session.sql(before_after_agg_sql).collect()
+                res = pd.DataFrame(before_after_agg)
+                import ast
+                
+                if not res.empty:
+                    def convert_uid_list(uid_entry):
+                        if isinstance(uid_entry, str):
+                            try:
+                                return ast.literal_eval(uid_entry)  # Safely convert string to list
+                            except:
+                                return []
+                        elif isinstance(uid_entry, list):
+                            return uid_entry
+                        else:
+                            return []
+                    
+                    res['UID_LIST'] = res['UID_LIST'].apply(convert_uid_list)
+                    
+                    # Store total paths before applying topn filter
+                    total_paths = len(res)
+                    
+                    # Apply TOP N limit at pandas level
+                    res = res.head(topn)
+                    
+                    # Save results
+                    st.session_state['before_after_agg'] = res
+                    
+                    # Display success message
+                    displayed_paths = len(res)
+                    if total_paths <= topn:
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {displayed_paths:,} unique paths retrieved from {res['COUNT'].sum():,} customer journeys
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div class="custom-container-1">
+                            <h5 style="font-size: 14px; font-weight: 200; margin-top: 0px; margin-bottom: -15px;">
+                                Analysis complete: {displayed_paths:,} of {total_paths:,} unique paths retrieved (showing top {topn})
+                            </h5>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Create two columns for layout
+                    col1, col2 = st.columns([2, 7])
+                
+                    # Place the toggle in the first column
+                    with col1:
+                        show_details_ba = st.toggle("Show me!", key="show_details_ba", help="Select a visualization option: Sankey or Graph.")
+
+                    # Place the pills in the second column, but only if the toggle is on
+                    with col2:
+                        if 'show_details_ba' in locals() and show_details_ba:
+                            genre_ba = st.pills(
+                                "Choose a visualization:",
+                                ["Sankey", "Graph"],
+                                label_visibility="collapsed",
+                                key="genre_ba"
+                            )
+                        else:
+                            genre_ba = None
+                
+                    # Place the visualization outside of the columns layout
+                    if show_details_ba and genre_ba:
+                        # Initialize hash for session state tracking
+                        current_df_hash = hash(res.to_json())
+                        if "last_df_hash" not in st.session_state or st.session_state["last_df_hash"] != current_df_hash:
+                            st.session_state["last_df_hash"] = current_df_hash
+                        
+                        if genre_ba == 'Sankey':
+                            with st.container(border=True):
+                                col1, col2 = st.columns([1, 2])
+                                with col1:
+                                    percentage_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_ba")
+                                with col2:
+                                    st.write("")
+                                
+                                clicked_sankey_ba = sankey_chart(res, direction="before_after", topN_percentage=percentage_ba, middle_events=middle_event)
+                            
+                            if clicked_sankey_ba:
+                                sankeyLabel = st.session_state.get("sankey_labels", [])
+                                sortedEventList = st.session_state.get("sortedEventList", [])
+                                sankeyLinks = st.session_state.get("sankey_links", {})
+                                if "source" in clicked_sankey_ba and "target" in clicked_sankey_ba:
+                                    source_index = clicked_sankey_ba["source"]
+                                    target_index = clicked_sankey_ba["target"]
+                                    clicked_source = sortedEventList[source_index]
+                                    clicked_target = sortedEventList[target_index]
+                                    source_parts = clicked_source.split('_', 1)
+                                    target_parts = clicked_target.split('_', 1)
+                                    source_name = source_parts[1] if len(source_parts) >= 2 else clicked_source
+                                    target_name = target_parts[1] if len(target_parts) >= 2 else clicked_target
+                                    st.caption(f"Selected Edge: {source_name} → {target_name}")
+                        
+                        elif genre_ba == 'Graph':
+                            with st.container(border=True):
+                                col1, col2 = st.columns([1, 2])
+                                with col1:
+                                    percentage_graph_ba = st.slider("Display Top % of Paths", 1, 100, 100, key="percentage_graph_ba")
+                                with col2:
+                                    st.write("")
+                                
+                                topN_graph_ba = int(len(res) * percentage_graph_ba / 100)
+                                sigma_graph(res.head(topN_graph_ba))
+                    
+                    # View SQL toggle
+                    if st.toggle("View SQL for Aggregated Paths", key="view_sql_ba", help="View the SQL query used for this analysis"):
+                        st.code(before_after_agg_sql, language="sql")
+                    
+                    # Writeback toggle
+                    if st.toggle("Writeback Segments to Snowflake", key="writeback_before_after",
+                            help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                        with st.expander("Writeback Segments to Snowflake", expanded=True, icon=":material/upload:"):
+                            # Path selection
+                            st.markdown("**Select Paths to Export**")
+                            
+                            # Select All checkbox
+                            select_all_before_after = st.checkbox("Select All Paths", value=False, key="select_all_before_after")
+                            
+                            # Multiselect for paths
+                            if select_all_before_after:
+                                default_paths_before_after = res['PATH'].tolist()
+                            else:
+                                default_paths_before_after = []
+                            
+                            selected_paths_before_after = st.multiselect(
+                                "Choose path(s):",
+                                options=res['PATH'].tolist(),
+                                default=default_paths_before_after,
+                                key="selected_paths_before_after"
+                            )
+                            
+                            if selected_paths_before_after:
+                                # Filter dataframe
+                                filtered_df_before_after = res[res['PATH'].isin(selected_paths_before_after)]
+                                
+                                # Show export preview
+                                st.info(f"Export Preview: {len(selected_paths_before_after)} path(s) selected, "
+                                       f"{filtered_df_before_after['COUNT'].sum():,} total occurrences, "
+                                       f"{filtered_df_before_after['UID_LIST'].apply(len).sum():,} total user IDs", 
+                                       icon=":material/info:")
+                                
+                                # Database/Schema/Table selection
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    wb_database_before_after = st.selectbox("Database", fetch_databases(session), key="wb_db_before_after")
+                                with col2:
+                                    if wb_database_before_after:
+                                        wb_schema_before_after = st.selectbox("Schema", fetch_schemas(session, wb_database_before_after), key="wb_schema_before_after")
+                                
+                                wb_table_before_after = st.text_input("Table Name", value="PATH_SEGMENTS_BEFORE_AFTER", key="wb_table_before_after")
+                                
+                                wb_mode_before_after = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_before_after")
+                                
+                                if st.button("Write Table", key="write_btn_before_after"):
+                                    if wb_database_before_after and wb_schema_before_after and wb_table_before_after:
+                                        try:
+                                            with st.spinner("Writing to Snowflake..."):
+                                                # Create Snowpark DataFrame
+                                                export_df_before_after = session.create_dataframe(filtered_df_before_after[['PATH', 'COUNT', 'UID_LIST']])
+                                                
+                                                # Write to table
+                                                if wb_mode_before_after == "Create or Replace":
+                                                    export_df_before_after.write.mode("overwrite").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
+                                                else:
+                                                    export_df_before_after.write.mode("append").save_as_table(f"{wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}")
+                                                
+                                                st.success(f"✅ Successfully wrote {len(filtered_df_before_after)} rows to {wb_database_before_after}.{wb_schema_before_after}.{wb_table_before_after}", 
+                                                          icon=":material/check:")
+                                        except Exception as e:
+                                            st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/error:")
+                                    else:
+                                        st.warning("Please select database, schema, and table name", icon=":material/warning:")
+                else:
+                    st.info("No patterns found matching the criteria.", icon=":material/info:")
+            else:
+                st.warning("Please select both Unit of time and timeout value to enable sessionize.", icon=":material/warning:")
         
         # PATH TO: Pattern = A{{{minnbbevt},{maxnbbevt}}} B
         elif pattern_mode == "FROM/TO" and fromevt.strip("'") == 'Any' and toevt.strip("'") != 'Any':
@@ -2248,7 +2269,7 @@ with tab1:
                  FROM
                 {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
          ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
+        OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION
         FROM events_with_diff)
         SELECT *FROM sessions)
                         match_recognize(
@@ -2262,8 +2283,11 @@ with tab1:
                 {groupby} ) 
             group by path order by count desc 
             """
+            else:
+                st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                st.stop()
             
-                path_to_agg = session.sql(path_to_agg_sql).collect()
+            path_to_agg = session.sql(path_to_agg_sql).collect()
             # If the DataFrame is not empty, show Sankey plot
             
             res = pd.DataFrame(path_to_agg)
@@ -2568,7 +2592,7 @@ with tab1:
                     elif genre == 'Sunburst':
                         with st.container(border=True):
                             process_and_generate_sunburst(res, direction="to")
-
+                
                 # AI-Powered Insights with model selection (only show if toggle is on)
                 if 'show_details' in locals() and show_details:
                     def path_ai_analysis_callback(selected_model, prompt_type):
@@ -2651,95 +2675,92 @@ with tab1:
                 if st.toggle("View SQL for Aggregated Paths"):    
                     st.code(path_to_agg_sql, language='sql')
 
-            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_to", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
-                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
-                    # Use aggregated paths data already computed for visualization
-                    if path_to_agg is not None and len(path_to_agg) > 0:
-                        # Convert to DataFrame for easier manipulation
-                        paths_df = pd.DataFrame(path_to_agg)
-                        
-                        # Path selector
-                        available_paths = paths_df['PATH'].tolist()
-                        
-                        # Select All checkbox
-                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_to")
-                        
-                        # Determine default selection based on checkbox
-                        if select_all:
-                            default_selection = available_paths
-                        else:
-                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
-                        
-                        selected_paths = st.multiselect(
-                            "Choose one or more paths",
-                            options=available_paths,
-                            default=default_selection,
-                            key="wb_path_select_to",
-                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
-                        )
-                        
-                        if selected_paths:
-                            # Show preview
-                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
-                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
-                            st.info(f"Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_to", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                    with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                        # Use aggregated paths data already computed for visualization
+                        if path_to_agg is not None and len(path_to_agg) > 0:
+                            # Convert to DataFrame for easier manipulation
+                            paths_df = pd.DataFrame(path_to_agg)
                             
-                            # Fetch DBs using cached method
-                            db0 = fetch_databases(session)
+                            # Path selector
+                            available_paths = paths_df['PATH'].tolist()
                             
-                            # Database, Schema, Table selection
-                            col1, col2, col3 = st.columns(3)
+                            # Select All checkbox
+                            select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_to")
                             
-                            with col1:
-                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_to", placeholder="Choose...")
+                            # Determine default selection based on checkbox
+                            if select_all:
+                                default_selection = available_paths
+                            else:
+                                default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
                             
-                            wb_schema = None
-                            if wb_database:
-                                schema0 = fetch_schemas(session, wb_database)
+                            selected_paths = st.multiselect(
+                                "Choose one or more paths",
+                                options=available_paths,
+                                default=default_selection,
+                                key="wb_path_select_to",
+                                help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                            )
+                            
+                            if selected_paths:
+                                # Show preview
+                                filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                                total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                                st.info(f"Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
                                 
-                                with col2:
-                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_to", placeholder="Choose...")
-                            
-                            with col3:
-                                if wb_database and wb_schema:
-                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_to", placeholder="e.g. path_to_aggregated")
-                                else:
-                                    wb_table_name = None
-                            
-                            # Write mode and button
-                            if wb_database and wb_schema and wb_table_name:
-                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_to", horizontal=True)
+                                # Fetch DBs using cached method
+                                db0 = fetch_databases(session)
                                 
-                                if st.button("Write Table", key="wb_btn_path_to"):
-                                    try:
-                                        with st.spinner("Writing aggregated paths to Snowflake..."):
-                                            # Filter and convert to Snowpark DataFrame
-                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
-                                            snowpark_df = session.create_dataframe(export_df)
-                                            
-                                            # Write to table based on mode
-                                            if write_mode == "Create or Replace":
-                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            else:
-                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            
-                                            # Get actual row count from written table
-                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
-                                            
-                                            # Success message
-                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
-                                            
-                                    except Exception as e:
-                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                                # Database, Schema, Table selection
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_to", placeholder="Choose...")
+                                
+                                wb_schema = None
+                                if wb_database:
+                                    schema0 = fetch_schemas(session, wb_database)
+                                    
+                                    with col2:
+                                        wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_to", placeholder="Choose...")
+                                
+                                with col3:
+                                    if wb_database and wb_schema:
+                                        wb_table_name = st.text_input("Table Name", key="wb_tbl_path_to", placeholder="e.g. path_to_aggregated")
+                                    else:
+                                        wb_table_name = None
+                                
+                                # Write mode and button
+                                if wb_database and wb_schema and wb_table_name:
+                                    write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_to", horizontal=True)
+                                    
+                                    if st.button("Write Table", key="wb_btn_path_to"):
+                                        try:
+                                            with st.spinner("Writing aggregated paths to Snowflake..."):
+                                                # Filter and convert to Snowpark DataFrame
+                                                export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                                snowpark_df = session.create_dataframe(export_df)
+                                                
+                                                # Write to table based on mode
+                                                if write_mode == "Create or Replace":
+                                                    snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                else:
+                                                    snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                
+                                                # Get actual row count from written table
+                                                written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                                
+                                                # Success message
+                                                st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                                
+                                        except Exception as e:
+                                            st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                            else:
+                                st.warning("Please select at least one path to export", icon=":material/warning:")
                         else:
-                            st.warning("Please select at least one path to export", icon=":material/warning:")
-                    else:
-                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
-                
+                            st.info("No paths available. Please run the analysis first.", icon=":material/info:")
             else:
-                    st.write("") 
-                
-        
+                st.info("No paths found matching the criteria. Try adjusting your filters or date range.", icon=":material/info:")
 
         # Separate block for PATH FROM 
         elif pattern_mode == "FROM/TO" and fromevt.strip("'") != 'Any' and toevt.strip("'")== 'Any':
@@ -2810,7 +2831,7 @@ with tab1:
                     {tmstp}) AS TIMEWINDOW
                  FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
+                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION
                 FROM events_with_diff)
                  SELECT *FROM sessions)
                             match_recognize(
@@ -2824,8 +2845,11 @@ with tab1:
                     {groupby} ) 
                 group by path order by count desc 
                 """
+            else:
+                st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                st.stop()
     
-                path_frm_agg = session.sql(path_frm_agg_sql).collect()
+            path_frm_agg = session.sql(path_frm_agg_sql).collect()
             
             # If the DataFrame is not empty, show Sankey plot
             res = pd.DataFrame(path_frm_agg)
@@ -3118,176 +3142,175 @@ with tab1:
                     elif genre == 'Sunburst':
                         with st.container(border=True):
                             process_and_generate_sunburst(res, direction="from")
-                        
-            # AI-Powered Insights with model selection (only show if toggle is on)
-            if 'show_details' in locals() and show_details:
-                def path_ai_analysis_callback(selected_model, prompt_type):
-                    """Callback function for path analysis AI insights"""
-                    
-                    # Show custom prompt input if Custom is selected
-                    if prompt_type == "Custom":
-                        custom_prompt = st.text_area(
-                            "Enter your custom prompt:",
-                            value="",
-                            key="path_from_custom_prompt",
-                            help="Enter your custom analysis prompt. The path data will be automatically included.",
-                            placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
-                        )
-                        
-                        # Only proceed if custom prompt is not empty
-                        if not custom_prompt or custom_prompt.strip() == "":
-                            st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
-                            return
-                    
-                    with st.spinner("Generating AI insights..."):
-                        try:
-                            # Use the same number of paths as selected by user (topn)
-                            top_paths = res.head(topn)
-                            paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
-                                                    for _, row in top_paths.iterrows()])
-                            
-                            if prompt_type == "Auto":
-                                ai_prompt = f"""
-                                Analyze these top {topn} customer journey paths:
-                                
-                                {paths_text}
-                                
-                                Total Paths Found: {len(res)}
-                                
-                                Please provide insights on:
-                                1. Most significant customer journey patterns
-                                2. User behavior implications 
-                                3. Potential optimization opportunities
-                                4. Anomalies or interesting findings
-                                
-                                Keep your analysis concise and actionable.
-                                """
-                            else:  # Custom
-                                ai_prompt = f"""
-                                {custom_prompt}
-                                
-                                Data to analyze - Top {topn} customer journey paths:
-                                {paths_text}
-                                
-                                Total Paths Found: {len(res)}
-                                """
-                            
-                            # Use selected model for Snowflake Cortex analysis
-                            ai_sql = f"""
-                            SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                                '{selected_model}',
-                                '{ai_prompt.replace("'", "''")}'
-                            ) as insights
-                            """
-                            
-                            ai_result = session.sql(ai_sql).collect()
-                            if ai_result:
-                                insights = ai_result[0]['INSIGHTS']
-                                
-                                st.markdown("**AI-Generated Insights**")
-                                st.markdown(insights)
-                    
-                        except Exception as e:
-                            st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
                 
-                # Display AI insights section with model selection
-                ai_model, ai_enabled, prompt_type = display_ai_insights_section(
-                    "path_from_ai", 
-                    "Select the LLM model for AI analysis of path results",
-                    ai_content_callback=path_ai_analysis_callback
-                )  
+                # AI-Powered Insights with model selection (only show if toggle is on)
+                if 'show_details' in locals() and show_details:
+                    def path_ai_analysis_callback(selected_model, prompt_type):
+                        """Callback function for path analysis AI insights"""
+                        
+                        # Show custom prompt input if Custom is selected
+                        if prompt_type == "Custom":
+                            custom_prompt = st.text_area(
+                                "Enter your custom prompt:",
+                                value="",
+                                key="path_from_custom_prompt",
+                                help="Enter your custom analysis prompt. The path data will be automatically included.",
+                                placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
+                            )
                             
+                            # Only proceed if custom prompt is not empty
+                            if not custom_prompt or custom_prompt.strip() == "":
+                                st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
+                                return
+                        
+                        with st.spinner("Generating AI insights..."):
+                            try:
+                                # Use the same number of paths as selected by user (topn)
+                                top_paths = res.head(topn)
+                                paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
+                                                        for _, row in top_paths.iterrows()])
+                                
+                                if prompt_type == "Auto":
+                                    ai_prompt = f"""
+                                    Analyze these top {topn} customer journey paths:
+                                    
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    
+                                    Please provide insights on:
+                                    1. Most significant customer journey patterns
+                                    2. User behavior implications 
+                                    3. Potential optimization opportunities
+                                    4. Anomalies or interesting findings
+                                    
+                                    Keep your analysis concise and actionable.
+                                    """
+                                else:  # Custom
+                                    ai_prompt = f"""
+                                    {custom_prompt}
+                                    
+                                    Data to analyze - Top {topn} customer journey paths:
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    """
+                                
+                                # Use selected model for Snowflake Cortex analysis
+                                ai_sql = f"""
+                                SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                                    '{selected_model}',
+                                    '{ai_prompt.replace("'", "''")}'
+                                ) as insights
+                                """
+                                
+                                ai_result = session.sql(ai_sql).collect()
+                                if ai_result:
+                                    insights = ai_result[0]['INSIGHTS']
+                                    
+                                    st.markdown("**AI-Generated Insights**")
+                                    st.markdown(insights)
+                        
+                            except Exception as e:
+                                st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
+                    
+                    # Display AI insights section with model selection
+                    ai_model, ai_enabled, prompt_type = display_ai_insights_section(
+                        "path_from_ai", 
+                        "Select the LLM model for AI analysis of path results",
+                        ai_content_callback=path_ai_analysis_callback
+                    )  
+                                
                 # View Aggregated Paths SQL
-            if st.toggle("View SQL for Aggregated Paths"):     
-                    st.code(path_frm_agg_sql, language='sql')
+                if st.toggle("View SQL for Aggregated Paths"):     
+                        st.code(path_frm_agg_sql, language='sql')
 
-            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_from", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
-                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
-                    # Use aggregated paths data already computed for visualization
-                    if path_frm_agg is not None and len(path_frm_agg) > 0:
-                        # Convert to DataFrame for easier manipulation
-                        paths_df = pd.DataFrame(path_frm_agg)
-                        
-                        # Path selector
-                        available_paths = paths_df['PATH'].tolist()
-                        
-                        # Select All checkbox
-                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_from")
-                        
-                        # Determine default selection based on checkbox
-                        if select_all:
-                            default_selection = available_paths
-                        else:
-                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
-                        
-                        selected_paths = st.multiselect(
-                            "Choose one or more paths",
-                            options=available_paths,
-                            default=default_selection,
-                            key="wb_path_select_from",
-                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
-                        )
-                        
-                        if selected_paths:
-                            # Show preview
-                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
-                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
-                            st.info(f"📊 Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
-                            
-                            # Fetch DBs using cached method
-                            db0 = fetch_databases(session)
-                            
-                            # Database, Schema, Table selection
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_from", placeholder="Choose...")
-                            
-                            wb_schema = None
-                            if wb_database:
-                                schema0 = fetch_schemas(session, wb_database)
+                if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_from", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                        with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                            # Use aggregated paths data already computed for visualization
+                            if path_frm_agg is not None and len(path_frm_agg) > 0:
+                                # Convert to DataFrame for easier manipulation
+                                paths_df = pd.DataFrame(path_frm_agg)
                                 
-                                with col2:
-                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_from", placeholder="Choose...")
-                            
-                            with col3:
-                                if wb_database and wb_schema:
-                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_from", placeholder="e.g. path_from_aggregated")
+                                # Path selector
+                                available_paths = paths_df['PATH'].tolist()
+                                
+                                # Select All checkbox
+                                select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_from")
+                                
+                                # Determine default selection based on checkbox
+                                if select_all:
+                                    default_selection = available_paths
                                 else:
-                                    wb_table_name = None
-                            
-                            # Write mode and button
-                            if wb_database and wb_schema and wb_table_name:
-                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_from", horizontal=True)
+                                    default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
                                 
-                                if st.button("Write Table", key="wb_btn_path_from"):
-                                    try:
-                                        with st.spinner("Writing aggregated paths to Snowflake..."):
-                                            # Filter and convert to Snowpark DataFrame
-                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
-                                            snowpark_df = session.create_dataframe(export_df)
-                                            
-                                            # Write to table based on mode
-                                            if write_mode == "Create or Replace":
-                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            else:
-                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            
-                                            # Get actual row count from written table
-                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
-                                            
-                                            # Success message
-                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
-                                            
-                                    except Exception as e:
-                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
-                        else:
-                            st.warning("Please select at least one path to export", icon=":material/warning:")
-                    else:
-                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
-                
+                                selected_paths = st.multiselect(
+                                    "Choose one or more paths",
+                                    options=available_paths,
+                                    default=default_selection,
+                                    key="wb_path_select_from",
+                                    help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                                )
+                                
+                                if selected_paths:
+                                    # Show preview
+                                    filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                                    total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                                    st.info(f"Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                                    
+                                    # Fetch DBs using cached method
+                                    db0 = fetch_databases(session)
+                                    
+                                    # Database, Schema, Table selection
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_from", placeholder="Choose...")
+                                    
+                                    wb_schema = None
+                                    if wb_database:
+                                        schema0 = fetch_schemas(session, wb_database)
+                                        
+                                        with col2:
+                                            wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_from", placeholder="Choose...")
+                                    
+                                    with col3:
+                                        if wb_database and wb_schema:
+                                            wb_table_name = st.text_input("Table Name", key="wb_tbl_path_from", placeholder="e.g. path_from_aggregated")
+                                        else:
+                                            wb_table_name = None
+                                    
+                                    # Write mode and button
+                                    if wb_database and wb_schema and wb_table_name:
+                                        write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_from", horizontal=True)
+                                        
+                                        if st.button("Write Table", key="wb_btn_path_from"):
+                                            try:
+                                                with st.spinner("Writing aggregated paths to Snowflake..."):
+                                                    # Filter and convert to Snowpark DataFrame
+                                                    export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                                    snowpark_df = session.create_dataframe(export_df)
+                                                    
+                                                    # Write to table based on mode
+                                                    if write_mode == "Create or Replace":
+                                                        snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                    else:
+                                                        snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                    
+                                                    # Get actual row count from written table
+                                                    written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                                    
+                                                    # Success message
+                                                    st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                                    
+                                            except Exception as e:
+                                                st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                                else:
+                                    st.warning("Please select at least one path to export", icon=":material/warning:")
+                            else:
+                                st.info("No paths available. Please run the analysis first.", icon=":material/info:")
             else:
-                st.write("")
+                st.info("No paths found matching the criteria. Try adjusting your filters or date range.", icon=":material/info:")
                 
         # Separate block for PATH BETWEEN 
         elif pattern_mode == "FROM/TO" and fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any':
@@ -3358,7 +3381,7 @@ with tab1:
                     {tmstp}) AS TIMEWINDOW
                  FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
                 ,sessions AS (SELECT {uid},{tmstp},{evt},TIMEWINDOW, SUM(CASE WHEN TIMEWINDOW > {timeout} OR TIMEWINDOW IS NULL THEN 1 ELSE 0 END)
-                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS session
+                 OVER (PARTITION BY {uid} ORDER BY {tmstp}) AS SESSION
                 FROM events_with_diff)
                  SELECT *FROM sessions)
                             match_recognize(
@@ -3372,8 +3395,11 @@ with tab1:
                     {groupby} ) 
                 group by path order by count desc 
                 """
+            else:
+                st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                st.stop()
                
-                path_betw_agg = session.sql(path_betw_agg_sql).collect()
+            path_betw_agg = session.sql(path_betw_agg_sql).collect()
             
             # If the DataFrame is not empty, show Sankey plot
             res = pd.DataFrame(path_betw_agg)
@@ -3593,178 +3619,178 @@ with tab1:
                     elif genre == 'Sunburst':
                         with st.container(border=True):
                             process_and_generate_sunburst(res, direction="to")
-                        
-            # AI-Powered Insights with model selection (only show if toggle is on)
-            if 'show_details' in locals() and show_details:
-                def path_ai_analysis_callback(selected_model, prompt_type):
-                    """Callback function for path analysis AI insights"""
-                    
-                    # Show custom prompt input if Custom is selected
-                    if prompt_type == "Custom":
-                        custom_prompt = st.text_area(
-                            "Enter your custom prompt:",
-                            value="",
-                            key="path_between_custom_prompt",
-                            help="Enter your custom analysis prompt. The path data will be automatically included.",
-                            placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
-                        )
-                        
-                        # Only proceed if custom prompt is not empty
-                        if not custom_prompt or custom_prompt.strip() == "":
-                            st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
-                            return
-                    
-                    with st.spinner("Generating AI insights..."):
-                        try:
-                            # Use the same number of paths as selected by user (topn)
-                            top_paths = res.head(topn)
-                            paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
-                                                    for _, row in top_paths.iterrows()])
-                            
-                            if prompt_type == "Auto":
-                                ai_prompt = f"""
-                                Analyze these top {topn} customer journey paths:
-                                
-                                {paths_text}
-                                
-                                Total Paths Found: {len(res)}
-                                
-                                Please provide insights on:
-                                1. Most significant customer journey patterns
-                                2. User behavior implications 
-                                3. Potential optimization opportunities
-                                4. Anomalies or interesting findings
-                                
-                                Keep your analysis concise and actionable.
-                                """
-                            else:  # Custom
-                                ai_prompt = f"""
-                                {custom_prompt}
-                                
-                                Data to analyze - Top {topn} customer journey paths:
-                                {paths_text}
-                                
-                                Total Paths Found: {len(res)}
-                                """
-                            
-                            # Use selected model for Snowflake Cortex analysis
-                            ai_sql = f"""
-                            SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                                '{selected_model}',
-                                '{ai_prompt.replace("'", "''")}'
-                            ) as insights
-                            """
-                            
-                            ai_result = session.sql(ai_sql).collect()
-                            if ai_result:
-                                insights = ai_result[0]['INSIGHTS']
-                                
-                                st.markdown("**AI-Generated Insights**")
-                                st.markdown(insights)
-                    
-                        except Exception as e:
-                            st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
                 
-                # Display AI insights section with model selection
-                ai_model, ai_enabled, prompt_type = display_ai_insights_section(
-                    "path_between_ai", 
-                    "Select the LLM model for AI analysis of path results",
-                    ai_content_callback=path_ai_analysis_callback
-                )                  
+                # AI-Powered Insights with model selection (only show if toggle is on)
+                if 'show_details' in locals() and show_details:
+                    def path_ai_analysis_callback(selected_model, prompt_type):
+                        """Callback function for path analysis AI insights"""
+                        
+                        # Show custom prompt input if Custom is selected
+                        if prompt_type == "Custom":
+                            custom_prompt = st.text_area(
+                                "Enter your custom prompt:",
+                                value="",
+                                key="path_between_custom_prompt",
+                                help="Enter your custom analysis prompt. The path data will be automatically included.",
+                                placeholder="Type your custom prompt here and press Ctrl+Enter or Cmd+Enter to submit..."
+                            )
+                            
+                            # Only proceed if custom prompt is not empty
+                            if not custom_prompt or custom_prompt.strip() == "":
+                                st.info("Please enter your custom prompt above to generate AI insights.", icon=":material/info:")
+                                return
+                        
+                        with st.spinner("Generating AI insights..."):
+                            try:
+                                # Use the same number of paths as selected by user (topn)
+                                top_paths = res.head(topn)
+                                paths_text = "\n".join([f"{row['PATH']} (count: {row['COUNT']})" 
+                                                        for _, row in top_paths.iterrows()])
+                                
+                                if prompt_type == "Auto":
+                                    ai_prompt = f"""
+                                    Analyze these top {topn} customer journey paths:
+                                    
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    
+                                    Please provide insights on:
+                                    1. Most significant customer journey patterns
+                                    2. User behavior implications 
+                                    3. Potential optimization opportunities
+                                    4. Anomalies or interesting findings
+                                    
+                                    Keep your analysis concise and actionable.
+                                    """
+                                else:  # Custom
+                                    ai_prompt = f"""
+                                    {custom_prompt}
+                                    
+                                    Data to analyze - Top {topn} customer journey paths:
+                                    {paths_text}
+                                    
+                                    Total Paths Found: {len(res)}
+                                    """
+                                
+                                # Use selected model for Snowflake Cortex analysis
+                                ai_sql = f"""
+                                SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                                    '{selected_model}',
+                                    '{ai_prompt.replace("'", "''")}'
+                                ) as insights
+                                """
+                                
+                                ai_result = session.sql(ai_sql).collect()
+                                if ai_result:
+                                    insights = ai_result[0]['INSIGHTS']
+                                    
+                                    st.markdown("**AI-Generated Insights**")
+                                    st.markdown(insights)
+                        
+                            except Exception as e:
+                                st.warning(f"AI insights not available: {str(e)}", icon=":material/warning:")
+                    
+                    # Display AI insights section with model selection
+                    ai_model, ai_enabled, prompt_type = display_ai_insights_section(
+                        "path_between_ai", 
+                        "Select the LLM model for AI analysis of path results",
+                        ai_content_callback=path_ai_analysis_callback
+                    )                  
+                
                 # View Aggregated Paths SQL
-            if st.toggle("View SQL for Aggregated Paths"):      
-                st.code(path_betw_agg_sql, language='sql')
+                if st.toggle("View SQL for Aggregated Paths"):      
+                        st.code(path_betw_agg_sql, language='sql')
 
-            if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_between", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
-                with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
-                    # Use aggregated paths data already computed for visualization
-                    if path_betw_agg is not None and len(path_betw_agg) > 0:
-                        # Convert to DataFrame for easier manipulation
-                        paths_df = pd.DataFrame(path_betw_agg)
-                        
-                        # Path selector
-                        available_paths = paths_df['PATH'].tolist()
-                        
-                        # Select All checkbox
-                        select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_between")
-                        
-                        # Determine default selection based on checkbox
-                        if select_all:
-                            default_selection = available_paths
-                        else:
-                            default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
-                        
-                        selected_paths = st.multiselect(
-                            "Choose one or more paths",
-                            options=available_paths,
-                            default=default_selection,
-                            key="wb_path_select_between",
-                            help="Select which paths to export. Each path will include COUNT and UID_LIST"
-                        )
-                        
-                        if selected_paths:
-                            # Show preview
-                            filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
-                            total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
-                            st.info(f"📊 Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
-                            
-                            # Fetch DBs using cached method
-                            db0 = fetch_databases(session)
-                            
-                            # Database, Schema, Table selection
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_between", placeholder="Choose...")
-                            
-                            wb_schema = None
-                            if wb_database:
-                                schema0 = fetch_schemas(session, wb_database)
+                if st.toggle("Writeback Segments to Snowflake", key="writeback_toggle_path_between", help="Export selected path patterns with their counts and associated user IDs to a Snowflake table for targeted segmentation."):
+                        with st.expander("Writeback Segments to Snowflake", icon=":material/upload:", expanded=True):
+                            # Use aggregated paths data already computed for visualization
+                            if path_betw_agg is not None and len(path_betw_agg) > 0:
+                                # Convert to DataFrame for easier manipulation
+                                paths_df = pd.DataFrame(path_betw_agg)
                                 
-                                with col2:
-                                    wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_between", placeholder="Choose...")
-                            
-                            with col3:
-                                if wb_database and wb_schema:
-                                    wb_table_name = st.text_input("Table Name", key="wb_tbl_path_between", placeholder="e.g. path_between_aggregated")
+                                # Path selector
+                                available_paths = paths_df['PATH'].tolist()
+                                
+                                # Select All checkbox
+                                select_all = st.checkbox("Select All Paths", value=False, key="wb_select_all_between")
+                                
+                                # Determine default selection based on checkbox
+                                if select_all:
+                                    default_selection = available_paths
                                 else:
-                                    wb_table_name = None
-                            
-                            # Write mode and button
-                            if wb_database and wb_schema and wb_table_name:
-                                write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_between", horizontal=True)
+                                    default_selection = available_paths[:min(10, len(available_paths))]  # Default to top 10
                                 
-                                if st.button("Write Table", key="wb_btn_path_between"):
-                                    try:
-                                        with st.spinner("Writing aggregated paths to Snowflake..."):
-                                            # Filter and convert to Snowpark DataFrame
-                                            export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
-                                            snowpark_df = session.create_dataframe(export_df)
-                                            
-                                            # Write to table based on mode
-                                            if write_mode == "Create or Replace":
-                                                snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            else:
-                                                snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
-                                            
-                                            # Get actual row count from written table
-                                            written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
-                                            
-                                            # Success message
-                                            st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
-                                            
-                                    except Exception as e:
-                                        st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
-                        else:
-                            st.warning("Please select at least one path to export", icon=":material/warning:")
-                    else:
-                        st.info("No paths available. Please run the analysis first.", icon=":material/info:")
-                
+                                selected_paths = st.multiselect(
+                                    "Choose one or more paths",
+                                    options=available_paths,
+                                    default=default_selection,
+                                    key="wb_path_select_between",
+                                    help="Select which paths to export. Each path will include COUNT and UID_LIST"
+                                )
+                                
+                                if selected_paths:
+                                    # Show preview
+                                    filtered_df = paths_df[paths_df['PATH'].isin(selected_paths)]
+                                    total_users = sum([len(uid_list) for uid_list in filtered_df['UID_LIST']])
+                                    st.info(f"Export Preview: {len(selected_paths)} paths | {filtered_df['COUNT'].sum():,} occurrences | {total_users:,} unique users", icon=":material/info:")
+                                    
+                                    # Fetch DBs using cached method
+                                    db0 = fetch_databases(session)
+                                    
+                                    # Database, Schema, Table selection
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        wb_database = st.selectbox("Database", db0['name'].unique(), index=None, key="wb_db_path_between", placeholder="Choose...")
+                                    
+                                    wb_schema = None
+                                    if wb_database:
+                                        schema0 = fetch_schemas(session, wb_database)
+                                        
+                                        with col2:
+                                            wb_schema = st.selectbox("Schema", schema0['name'].unique(), index=None, key="wb_schema_path_between", placeholder="Choose...")
+                                    
+                                    with col3:
+                                        if wb_database and wb_schema:
+                                            wb_table_name = st.text_input("Table Name", key="wb_tbl_path_between", placeholder="e.g. path_between_aggregated")
+                                        else:
+                                            wb_table_name = None
+                                    
+                                    # Write mode and button
+                                    if wb_database and wb_schema and wb_table_name:
+                                        write_mode = st.radio("Write Mode", ["Create or Replace", "Append to Existing"], key="wb_mode_path_between", horizontal=True)
+                                        
+                                        if st.button("Write Table", key="wb_btn_path_between"):
+                                            try:
+                                                with st.spinner("Writing aggregated paths to Snowflake..."):
+                                                    # Filter and convert to Snowpark DataFrame
+                                                    export_df = filtered_df[['PATH', 'COUNT', 'UID_LIST']]
+                                                    snowpark_df = session.create_dataframe(export_df)
+                                                    
+                                                    # Write to table based on mode
+                                                    if write_mode == "Create or Replace":
+                                                        snowpark_df.write.mode("overwrite").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                    else:
+                                                        snowpark_df.write.mode("append").save_as_table(f"{wb_database}.{wb_schema}.{wb_table_name}")
+                                                    
+                                                    # Get actual row count from written table
+                                                    written_count = session.sql(f"SELECT COUNT(*) as count FROM {wb_database}.{wb_schema}.{wb_table_name}").collect()[0]['COUNT']
+                                                    
+                                                    # Success message
+                                                    st.success(f"Table {wb_database}.{wb_schema}.{wb_table_name} {'created' if write_mode == 'Create or Replace' else 'updated'} successfully with {written_count:,} paths", icon=":material/check:")
+                                                    
+                                            except Exception as e:
+                                                st.error(f"Error writing to Snowflake: {str(e)}", icon=":material/chat_error:")
+                                else:
+                                    st.warning("Please select at least one path to export", icon=":material/warning:")
+                            else:
+                                st.info("No paths available. Please run the analysis first.", icon=":material/info:")
             else:
-                st.write("")
+                st.info("No paths found matching the criteria. Try adjusting your filters or date range.", icon=":material/info:")
             
 
-        elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
+        elif pattern_mode == "FROM/TO" and fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
             st.warning("This is tuple generator",icon=":material/warning:")
             
             path_tupl_agg=None
@@ -4368,45 +4394,45 @@ with tab2:
                         # Generate SQL WHERE clause based on selected filters and logic
                         if filters:
                             sql_where_clause = " AND "
-                        #st.write(filters)
-                        for i, (col, operator, value) in enumerate(filters):
-                            if i > 0 and logic_operator:
-                                sql_where_clause += f" {logic_operator} "
-                            
-                            # Handle NULL operators
-                            if operator in ['IS NULL', 'IS NOT NULL']:
-                                sql_where_clause += f"{col} {operator}"
-                            
-                            # Handle IN and NOT IN operators
-                            elif operator in ['IN', 'NOT IN']:
-                                if len(value) == 1:
-                                    # Single value - convert to = or != for better performance
-                                    single_op = '=' if operator == 'IN' else '!='
-                                    if isinstance(value[0], (int, float)):
-                                        sql_where_clause += f"{col} {single_op} {value[0]}"
-                                    else:
-                                        sql_where_clause += f"{col} {single_op} '{value[0]}'"
-                                else:
-                                    # Multiple values - use proper IN/NOT IN with tuple
-                                    # Handle mixed types by converting all to strings for SQL safety
-                                    formatted_values = []
-                                    for v in value:
-                                        if isinstance(v, (int, float)):
-                                            formatted_values.append(str(v))
+                            #st.write(filters)
+                            for i, (col, operator, value) in enumerate(filters):
+                                if i > 0 and logic_operator:
+                                    sql_where_clause += f" {logic_operator} "
+                                
+                                # Handle NULL operators
+                                if operator in ['IS NULL', 'IS NOT NULL']:
+                                    sql_where_clause += f"{col} {operator}"
+                                
+                                # Handle IN and NOT IN operators
+                                elif operator in ['IN', 'NOT IN']:
+                                    if len(value) == 1:
+                                        # Single value - convert to = or != for better performance
+                                        single_op = '=' if operator == 'IN' else '!='
+                                        if isinstance(value[0], (int, float)):
+                                            sql_where_clause += f"{col} {single_op} {value[0]}"
                                         else:
-                                            formatted_values.append(f"'{v}'")
-                                    sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
-                            
-                            # Handle LIKE and NOT LIKE operators
-                            elif operator in ['LIKE', 'NOT LIKE']:
-                                sql_where_clause += f"{col} {operator} '{value}'"
-                            
-                            # Handle other operators (=, !=, <, <=, >, >=)
-                            else:
+                                            sql_where_clause += f"{col} {single_op} '{value[0]}'"
+                                    else:
+                                        # Multiple values - use proper IN/NOT IN with tuple
+                                        # Handle mixed types by converting all to strings for SQL safety
+                                        formatted_values = []
+                                        for v in value:
+                                            if isinstance(v, (int, float)):
+                                                formatted_values.append(str(v))
+                                            else:
+                                                formatted_values.append(f"'{v}'")
+                                        sql_where_clause += f"{col} {operator} ({', '.join(formatted_values)})"
+                                
+                                # Handle LIKE and NOT LIKE operators
+                                elif operator in ['LIKE', 'NOT LIKE']:
+                                    sql_where_clause += f"{col} {operator} '{value}'"
+                                
+                                # Handle other operators (=, !=, <, <=, >, >=)
+                                else:
                                     if isinstance(value, (int, float)):
                                         sql_where_clause += f"{col} {operator} {value}"
                                     else:
-                                 # For non-numeric values (strings, dates), enclose the value in quotes
+                                        # For non-numeric values (strings, dates), enclose the value in quotes
                                         sql_where_clause += f"{col} {operator} '{value}'"        
                         else:
                             sql_where_clause = ""
@@ -4737,48 +4763,48 @@ with tab2:
                         # Generate SQL WHERE clause for the second instance
                         if filters_instance:
                             sql_where_clause_instance = " AND "
-                        for i, (col_instance, operator_instance, value_instance) in enumerate(filters_instance):
-                            if i > 0 and logic_operator_instance:
-                                sql_where_clause_instance += f" {logic_operator_instance} "
-            
-                            # Handle NULL operators
-                            if operator_instance in ['IS NULL', 'IS NOT NULL']:
-                                sql_where_clause_instance += f"{col_instance} {operator_instance}"
-                            
-                            # Handle IN and NOT IN operators
-                            elif operator_instance in ['IN', 'NOT IN']:
-                                if len(value_instance) == 1:
-                                    # Single value - convert to = or != for better performance
-                                    single_op = '=' if operator_instance == 'IN' else '!='
-                                    if isinstance(value_instance[0], (int, float)):
-                                        sql_where_clause_instance += f"{col_instance} {single_op} {value_instance[0]}"
-                                    else:
-                                        sql_where_clause_instance += f"{col_instance} {single_op} '{value_instance[0]}'"
-                                else:
-                                    # Multiple values - use proper IN/NOT IN with tuple
-                                    # Handle mixed types by converting all to strings for SQL safety
-                                    formatted_values = []
-                                    for v in value_instance:
-                                        if isinstance(v, (int, float)):
-                                            formatted_values.append(str(v))
+                            for i, (col_instance, operator_instance, value_instance) in enumerate(filters_instance):
+                                if i > 0 and logic_operator_instance:
+                                    sql_where_clause_instance += f" {logic_operator_instance} "
+                
+                                # Handle NULL operators
+                                if operator_instance in ['IS NULL', 'IS NOT NULL']:
+                                    sql_where_clause_instance += f"{col_instance} {operator_instance}"
+                                
+                                # Handle IN and NOT IN operators
+                                elif operator_instance in ['IN', 'NOT IN']:
+                                    if len(value_instance) == 1:
+                                        # Single value - convert to = or != for better performance
+                                        single_op = '=' if operator_instance == 'IN' else '!='
+                                        if isinstance(value_instance[0], (int, float)):
+                                            sql_where_clause_instance += f"{col_instance} {single_op} {value_instance[0]}"
                                         else:
-                                            formatted_values.append(f"'{v}'")
-                                    sql_where_clause_instance += f"{col_instance} {operator_instance} ({', '.join(formatted_values)})"
-                            
-                            # Handle LIKE and NOT LIKE operators
-                            elif operator_instance in ['LIKE', 'NOT LIKE']:
-                                sql_where_clause_instance += f"{col_instance} {operator_instance} '{value_instance}'"
-                            
-                            # Handle other operators (=, !=, <, <=, >, >=)
-                            else:
-                                if isinstance(value_instance, (int, float)):
-                                    sql_where_clause_instance += f"{col_instance} {operator_instance} {value_instance}"
-                                else:
-                                    # For non-numeric values (strings, dates), enclose the value in quotes
+                                            sql_where_clause_instance += f"{col_instance} {single_op} '{value_instance[0]}'"
+                                    else:
+                                        # Multiple values - use proper IN/NOT IN with tuple
+                                        # Handle mixed types by converting all to strings for SQL safety
+                                        formatted_values = []
+                                        for v in value_instance:
+                                            if isinstance(v, (int, float)):
+                                                formatted_values.append(str(v))
+                                            else:
+                                                formatted_values.append(f"'{v}'")
+                                        sql_where_clause_instance += f"{col_instance} {operator_instance} ({', '.join(formatted_values)})"
+                                
+                                # Handle LIKE and NOT LIKE operators
+                                elif operator_instance in ['LIKE', 'NOT LIKE']:
                                     sql_where_clause_instance += f"{col_instance} {operator_instance} '{value_instance}'"
-            
-                        # Display the generated SQL WHERE clause
-                        #st.write(f"Generated SQL WHERE clause (Comp): {sql_where_clause_instance}")
+                                
+                                # Handle other operators (=, !=, <, <=, >, >=)
+                                else:
+                                    if isinstance(value_instance, (int, float)):
+                                        sql_where_clause_instance += f"{col_instance} {operator_instance} {value_instance}"
+                                    else:
+                                        # For non-numeric values (strings, dates), enclose the value in quotes
+                                        sql_where_clause_instance += f"{col_instance} {operator_instance} '{value_instance}'"
+                
+                            # Display the generated SQL WHERE clause
+                            #st.write(f"Generated SQL WHERE clause (Comp): {sql_where_clause_instance}")
                         else:
                             sql_where_clause_instance = ""
             
@@ -4790,6 +4816,67 @@ with tab2:
     if mode == 'Complement':
         
         if all([uid, evt, tmstp,fromevt, toevt]):
+            # Cleanup section - Manual temp table cleanup
+            with st.expander("Cleanup Temporary Tables", icon=":material/delete_sweep:"):
+                st.caption("Remove orphaned temporary tables from previous compare mode runs that failed to cleanup automatically.")
+                
+                cleanup_button = st.button(
+                    "Cleanup Temp Tables", 
+                    key='cleanup_compare_temp_tables',
+                    help="Cleanup temporary intermediate tables (RAWEVENTSREF_*, RAWEVENTSCOMP_*, TFIDFREF_*, TFIDFCOMP_*) from compare mode."
+                )
+                
+                # Show cleanup status from session state
+                if 'cleanup_status_compare' in st.session_state and st.session_state['cleanup_status_compare']:
+                    status = st.session_state['cleanup_status_compare']
+                    if status.get('success'):
+                        st.success(status['message'], icon=":material/check:")
+                    elif status.get('info'):
+                        st.info(status['message'], icon=":material/info:")
+                    elif status.get('warning'):
+                        st.warning(status['message'], icon=":material/warning:")
+                
+                # Execute cleanup when button is clicked
+                if cleanup_button:
+                    # Manual cleanup function
+                    try:
+                        cleanup_count = 0
+                        temp_table_prefixes = ["RAWEVENTSREF_", "RAWEVENTSCOMP_", "TFIDFREF_", "TFIDFCOMP_"]
+                        
+                        # Clean up any orphaned tables by pattern
+                        for pattern in temp_table_prefixes:
+                            try:
+                                list_tables_sql = f"SHOW TABLES LIKE '{pattern}%' IN {database}.{schema}"
+                                result = session.sql(list_tables_sql).collect()
+                                for row in result:
+                                    try:
+                                        cleanup_sql = f"DROP TABLE IF EXISTS {database}.{schema}.{row['name']}"
+                                        session.sql(cleanup_sql).collect()
+                                        cleanup_count += 1
+                                    except:
+                                        pass
+                            except:
+                                pass
+                        
+                        # Store status in session state for display
+                        if cleanup_count > 0:
+                            st.session_state['cleanup_status_compare'] = {
+                                'success': True,
+                                'message': f"Cleanup completed: {cleanup_count} temporary tables removed"
+                            }
+                        else:
+                            st.session_state['cleanup_status_compare'] = {
+                                'info': True,
+                                'message': "No temporary tables found to clean up"
+                            }
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state['cleanup_status_compare'] = {
+                            'warning': True,
+                            'message': f"Cleanup completed with some issues: {str(e)}"
+                        }
+                        st.rerun()
+            
             with st.expander("Group Labels", icon=":material/label:"):
                     #Name Reference and Compared Group
                 rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
@@ -4845,7 +4932,7 @@ with tab2:
                         # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
@@ -4859,7 +4946,7 @@ with tab2:
                         )  {groupby}) """
                     elif unitoftime != None and timeout !=None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
@@ -4874,6 +4961,9 @@ with tab2:
                             pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
                             define A as true, B AS {evt} IN ({toevt})
                         )  {groupby}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                         
                     # Run the SQL
                     crttblrawseventsref = session.sql(crttblrawseventsrefsql).collect()
@@ -4887,7 +4977,7 @@ with tab2:
                     
                     # CREATE TABLE individiual compared (complement set) Paths 
                     if unitoftime==None and timeout ==None :
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {evt} = {toevt} )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
@@ -4901,7 +4991,7 @@ with tab2:
                             define A AS {evt} NOT IN ({toevt})
                         )  {groupby}) """
                     elif unitoftime != None and timeout !=None :
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
@@ -4918,6 +5008,9 @@ with tab2:
                             pattern(A{{{minnbbevt},{maxnbbevt}}}) 
                             define A AS {evt} NOT IN ({toevt})
                         )  {groupby}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
     
                     # Run the SQL
                     crttblrawseventscomp = session.sql(crttblrawseventscompsql).collect()
@@ -4928,7 +5021,7 @@ with tab2:
                     unique_reftftable_name = generate_unique_reftftable_name()
                     
                     #CREATE TABLE TF-IDF Reference
-                    crttbltfidfrefsql=f"""CREATE TABLE {unique_reftftable_name} AS
+                    crttbltfidfrefsql=f"""CREATE TRANSIENT TABLE {unique_reftftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -4951,7 +5044,7 @@ with tab2:
                     unique_comptftable_name = generate_unique_comptftable_name()
                     
                     #CREATE TABLE TF-IDF Compared
-                    crttbltfidfcompsql=f"""CREATE TABLE {unique_comptftable_name} AS
+                    crttbltfidfcompsql=f"""CREATE TRANSIENT TABLE {unique_comptftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -5179,14 +5272,15 @@ with tab2:
                     except Exception as e:
                         st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
                                         
-                    # Robust cleanup of temporary tables
-                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
-                    for table_name in temp_tables:
-                        try:
-                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
-                        except Exception as e:
-                            st.warning(f"Could not drop table {table_name}: {str(e)}")
-                            pass
+                    # Strategic cleanup point 2: After sunburst charts (final cleanup)
+                    try:
+                        for table_name in [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]:
+                            try:
+                                session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                            except:
+                                pass  # Silently continue
+                    except:
+                        pass  # Variables may not exist
                 else:
                         st.write("") 
     
@@ -5207,7 +5301,7 @@ with tab2:
                          # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
@@ -5222,7 +5316,7 @@ with tab2:
                         st.write(crttblrawseventsrefsql)
                     
                     elif unitoftime != None and timeout !=None :
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
@@ -5239,6 +5333,9 @@ with tab2:
                             define B as true, A AS {evt} IN ({fromevt})
                         )  {groupby}) """
                         st.write(crttblrawseventsrefsql)
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                     # Run the SQL
                     crttblrawseventsref = session.sql(crttblrawseventsrefsql).collect()
                      # Generate a unique comp table name
@@ -5252,7 +5349,7 @@ with tab2:
                     # CREATE TABLE individiual compared (complement set) Paths 
                     if unitoftime==None and timeout ==None :
                     
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
                         {evt} not in({excl3})and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
@@ -5268,7 +5365,7 @@ with tab2:
                        
                     elif unitoftime != None and timeout !=None :
                         
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
@@ -5285,6 +5382,9 @@ with tab2:
                             pattern(A{{{minnbbevt},{maxnbbevt}}}) 
                             define A AS {evt} NOT IN ({fromevt})
                         )  {groupby}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                         
                     # Run the SQL
                     crttblrawseventscomp = session.sql(crttblrawseventscompsql).collect()
@@ -5296,7 +5396,7 @@ with tab2:
                     unique_reftftable_name = generate_unique_reftftable_name()
                     
                     #CREATE TABLE TF-IDF Reference
-                    crttbltfidfrefsql=f"""CREATE TABLE {unique_reftftable_name} AS
+                    crttbltfidfrefsql=f"""CREATE TRANSIENT TABLE {unique_reftftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -5319,7 +5419,7 @@ with tab2:
                     unique_comptftable_name = generate_unique_comptftable_name()
                     
                     #CREATE TABLE TF-IDF Compared
-                    crttbltfidfcompsql=f"""CREATE TABLE {unique_comptftable_name} AS
+                    crttbltfidfcompsql=f"""CREATE TRANSIENT TABLE {unique_comptftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -5517,14 +5617,15 @@ with tab2:
                     except Exception as e:
                         st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
                                         
-                    # Robust cleanup of temporary tables
-                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
-                    for table_name in temp_tables:
-                        try:
-                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
-                        except Exception as e:
-                            st.warning(f"Could not drop table {table_name}: {str(e)}")
-                            pass
+                    # Strategic cleanup point 2: After sunburst charts (final cleanup)
+                    try:
+                        for table_name in [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]:
+                            try:
+                                session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                            except:
+                                pass  # Silently continue
+                    except:
+                        pass  # Variables may not exist
         
                 else:
                     st.write("")
@@ -5533,7 +5634,7 @@ with tab2:
             elif fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any':
                 st.warning("Not a valid pattern for comparison",icon=":material/warning:")
     
-            elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
+            elif pattern_mode == "FROM/TO" and fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any':
                 st.warning("This is tuple generator - Not a valid pattern for comparison",icon=":material/warning:")
                 
             else:
@@ -5550,6 +5651,67 @@ with tab2:
    
     elif mode == 'Union':
         if all([uid, evt, tmstp,fromevt, toevt,uid1, evt1, tmstp1,fromevt1, toevt1]):
+            # Cleanup section - Manual temp table cleanup
+            with st.expander("Cleanup Temporary Tables", icon=":material/delete_sweep:"):
+                st.caption("Remove orphaned temporary tables from previous compare mode runs that failed to cleanup automatically.")
+                
+                cleanup_button = st.button(
+                    "Cleanup Temp Tables", 
+                    key='cleanup_union_temp_tables',
+                    help="Cleanup temporary intermediate tables (RAWEVENTSREF_*, RAWEVENTSCOMP_*, TFIDFREF_*, TFIDFCOMP_*) from compare mode."
+                )
+                
+                # Show cleanup status from session state
+                if 'cleanup_status_union' in st.session_state and st.session_state['cleanup_status_union']:
+                    status = st.session_state['cleanup_status_union']
+                    if status.get('success'):
+                        st.success(status['message'], icon=":material/check:")
+                    elif status.get('info'):
+                        st.info(status['message'], icon=":material/info:")
+                    elif status.get('warning'):
+                        st.warning(status['message'], icon=":material/warning:")
+                
+                # Execute cleanup when button is clicked
+                if cleanup_button:
+                    # Manual cleanup function
+                    try:
+                        cleanup_count = 0
+                        temp_table_prefixes = ["RAWEVENTSREF_", "RAWEVENTSCOMP_", "TFIDFREF_", "TFIDFCOMP_"]
+                        
+                        # Clean up any orphaned tables by pattern
+                        for pattern in temp_table_prefixes:
+                            try:
+                                list_tables_sql = f"SHOW TABLES LIKE '{pattern}%' IN {database}.{schema}"
+                                result = session.sql(list_tables_sql).collect()
+                                for row in result:
+                                    try:
+                                        cleanup_sql = f"DROP TABLE IF EXISTS {database}.{schema}.{row['name']}"
+                                        session.sql(cleanup_sql).collect()
+                                        cleanup_count += 1
+                                    except:
+                                        pass
+                            except:
+                                pass
+                        
+                        # Store status in session state for display
+                        if cleanup_count > 0:
+                            st.session_state['cleanup_status_union'] = {
+                                'success': True,
+                                'message': f"Cleanup completed: {cleanup_count} temporary tables removed"
+                            }
+                        else:
+                            st.session_state['cleanup_status_union'] = {
+                                'info': True,
+                                'message': "No temporary tables found to clean up"
+                            }
+                        st.rerun()
+                    except Exception as e:
+                        st.session_state['cleanup_status_union'] = {
+                            'warning': True,
+                            'message': f"Cleanup completed with some issues: {str(e)}"
+                        }
+                        st.rerun()
+            
             with st.expander("Group Labels", icon=":material/label:"):
                     #Name Reference and Compared Group
                 rename_groups= st.checkbox("Label Reference and Compared groups", key="disabled")
@@ -5587,7 +5749,7 @@ with tab2:
                         # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
@@ -5601,7 +5763,7 @@ with tab2:
                         )  {groupby}) """
                     elif unitoftime != None and timeout !=None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
@@ -5617,6 +5779,9 @@ with tab2:
                             pattern(A{{{minnbbevt},{maxnbbevt}}} B) 
                             define A as true, B AS {evt} IN ({toevt})
                         )  {groupby}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                     # Run the SQL
                     crttblrawseventsref = session.sql(crttblrawseventsrefsql).collect()
                     # Generate a unique comp table name
@@ -5630,7 +5795,7 @@ with tab2:
                     # CREATE TABLE individiual compared (complement set) Paths 
                     if unitoftime1==None and timeout1 ==None :
                         
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from  (select * from {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
                             match_recognize(
@@ -5644,7 +5809,7 @@ with tab2:
                         )  {groupby1}) """
                     elif unitoftime1 != None and timeout1 !=None :
                         
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from  (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
                         {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
@@ -5660,6 +5825,9 @@ with tab2:
                             pattern(A{{{minnbbevt1},{maxnbbevt1}}} B) 
                             define A as true, B AS {evt1} IN ({toevt1})
                         )  {groupby1}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                         
                     # Run the SQL
                     crttblrawseventscomp = session.sql(crttblrawseventscompsql).collect()
@@ -5670,7 +5838,7 @@ with tab2:
                     unique_reftftable_name = generate_unique_reftftable_name()
                     
                     #CREATE TABLE TF-IDF Reference
-                    crttbltfidfrefsql=f"""CREATE TABLE {unique_reftftable_name} AS
+                    crttbltfidfrefsql=f"""CREATE TRANSIENT TABLE {unique_reftftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -5693,7 +5861,7 @@ with tab2:
                     unique_comptftable_name = generate_unique_comptftable_name()
                     
                     #CREATE TABLE TF-IDF Compared
-                    crttbltfidfcompsql=f"""CREATE TABLE {unique_comptftable_name} AS
+                    crttbltfidfcompsql=f"""CREATE TRANSIENT TABLE {unique_comptftable_name} AS
                      (
                         Select
                         {uid1},SEQ,INDEX,
@@ -5920,14 +6088,15 @@ with tab2:
                     except Exception as e:
                         st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
                                         
-                    # Robust cleanup of temporary tables
-                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
-                    for table_name in temp_tables:
-                        try:
-                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
-                        except Exception as e:
-                            st.warning(f"Could not drop table {table_name}: {str(e)}")
-                            pass
+                    # Strategic cleanup point 2: After sunburst charts (final cleanup)
+                    try:
+                        for table_name in [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]:
+                            try:
+                                session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                            except:
+                                pass  # Silently continue
+                    except:
+                        pass  # Variables may not exist
                 else:
                         st.write("") 
     
@@ -5948,7 +6117,7 @@ with tab2:
                          # CREATE TABLE individiual reference Paths 
                     if unitoftime==None and timeout ==None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from  (select * from {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                             match_recognize(
@@ -5962,7 +6131,7 @@ with tab2:
                         )  {groupby}) """
                     elif unitoftime != None and timeout !=None :
                         
-                        crttblrawseventsrefsql = f"""CREATE TABLE {unique_reftable_name} AS (
+                        crttblrawseventsrefsql = f"""CREATE TRANSIENT TABLE {unique_reftable_name} AS (
                         select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid},{tmstp},{evt},TIMESTAMPDIFF({unitoftime}, LAG({tmstp}) OVER (PARTITION BY  {uid} ORDER BY {tmstp}),
                         {tmstp}) AS TIMEWINDOW FROM {database}.{schema}.{tbl} where  {evt} not in({excl3}) and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}'){sql_where_clause})
@@ -5992,7 +6161,7 @@ with tab2:
                     # CREATE TABLE individiual compared (complement set) Paths 
                     if unitoftime1==None and timeout1 ==None :
                         
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from  (select * from {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}') {sql_where_clause_instance}) 
                             match_recognize(
@@ -6006,7 +6175,7 @@ with tab2:
                         )  {groupby1}) """
                     elif unitoftime1 != None and timeout1 !=None :
                         
-                        crttblrawseventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
+                        crttblrawseventscompsql = f"""CREATE TRANSIENT TABLE {unique_comptable_name} AS (
                         select {uid1}, listagg({evt1}, ',') within group (order by MSQ) as path
                         from (WITH events_with_diff AS ( SELECT {uid1},{tmstp1},{evt1},TIMESTAMPDIFF({unitoftime1}, LAG({tmstp1}) OVER (PARTITION BY  {uid1} ORDER BY {tmstp1}),
                         {tmstp1}) AS TIMEWINDOW FROM {database1}.{schema1}.{tbl1} where  {evt1} not in({excl3_instance}) and {tmstp1} between DATE('{startdt_input1}') and DATE('{enddt_input1}'){sql_where_clause_instance})
@@ -6022,6 +6191,9 @@ with tab2:
                             pattern(A B{{{minnbbevt1},{maxnbbevt1}}}) 
                             define B as true, A AS {evt1} IN ({fromevt1})
                         )  {groupby1}) """
+                    else:
+                        st.error("Invalid sessionize configuration: please provide both Unit of time and timeout value, or neither.", icon=":material/error:")
+                        st.stop()
                         
                     # Run the SQL
                     crttblrawseventscomp = session.sql(crttblrawseventscompsql).collect()
@@ -6032,7 +6204,7 @@ with tab2:
                     unique_reftftable_name = generate_unique_reftftable_name()
                     
                     #CREATE TABLE TF-IDF Reference
-                    crttbltfidfrefsql=f"""CREATE TABLE {unique_reftftable_name} AS
+                    crttbltfidfrefsql=f"""CREATE TRANSIENT TABLE {unique_reftftable_name} AS
                      (
                         Select
                         {uid},SEQ,INDEX,
@@ -6055,7 +6227,7 @@ with tab2:
                     unique_comptftable_name = generate_unique_comptftable_name()
                     
                     #CREATE TABLE TF-IDF Compared
-                    crttbltfidfcompsql=f"""CREATE TABLE {unique_comptftable_name} AS
+                    crttbltfidfcompsql=f"""CREATE TRANSIENT TABLE {unique_comptftable_name} AS
                      (
                         Select
                         {uid1},SEQ,INDEX,
@@ -6249,14 +6421,15 @@ with tab2:
                     except Exception as e:
                         st.error(f"Error generating sunburst charts: {e}", icon=":material/chat_error:")
                                         
-                    # Robust cleanup of temporary tables
-                    temp_tables = [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]
-                    for table_name in temp_tables:
-                        try:
-                            session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
-                        except Exception as e:
-                            st.warning(f"Could not drop table {table_name}: {str(e)}")
-                            pass
+                    # Strategic cleanup point 2: After sunburst charts (final cleanup)
+                    try:
+                        for table_name in [unique_reftable_name, unique_comptable_name, unique_comptftable_name, unique_reftftable_name]:
+                            try:
+                                session.sql(f"DROP TABLE IF EXISTS {table_name}").collect()
+                            except:
+                                pass  # Silently continue
+                    except:
+                        pass  # Variables may not exist
         
                 else:
                     st.write("")
@@ -6265,7 +6438,7 @@ with tab2:
             elif fromevt.strip("'") != 'Any' and toevt.strip("'") != 'Any' and fromevt1.strip("'") != 'Any' and toevt1.strip("'") != 'Any':
                 st.warning("Not a valid pattern for comparison",icon=":material/warning:")
     
-            elif fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any' and fromevt1.strip("'") == 'Any' and toevt1.strip("'") == 'Any':
+            elif pattern_mode == "FROM/TO" and fromevt.strip("'") == 'Any' and toevt.strip("'") == 'Any' and fromevt1.strip("'") == 'Any' and toevt1.strip("'") == 'Any':
                 st.warning("This is tuple generator - Not a valid pattern for comparison",icon=":material/warning:")
                 
             else:
