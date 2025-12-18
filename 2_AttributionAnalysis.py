@@ -2107,7 +2107,7 @@ if all([uid, evt, tmstp]) and conv!= None and conv_value !="''":
          if unitoftime==None and timeout ==None :
              crttblrawsmceventscompsql = f"""CREATE TABLE {unique_comptable_name} AS (
              select {uid}, listagg({evt}, ',') within group (order by MSQ) as path
-             from  (select * from {database}.{schema}.{tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
+             from  (select * from {tbl} where {uid} NOT IN (SELECT DISTINCT ({uid}) FROM {unique_reftable_name} ) AND
              {evt} not in({excl3}) and {tmstp} < (SELECT MAX({tmstp})from {database}.{schema}.{tbl} where {conv}='{conv_value}' )and {tmstp} between DATE('{startdt_input}') and DATE('{enddt_input}') {sql_where_clause}) 
                  match_recognize(
                  {partitionby} 
